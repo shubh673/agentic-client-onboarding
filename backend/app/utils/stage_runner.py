@@ -163,17 +163,25 @@ async def _play_stage(app_id: uuid.UUID, stage: int) -> None:
         await _emit_log(app_id, stage, level, template)
 
 
-async def run_stages(app_id: uuid.UUID) -> None:
-    """Drive an application through stages 1..8 with live logs + state broadcasts.
+async def emit_initial_logs(app_id: uuid.UUID) -> None:
+    """Emit Stage 1 logs synchronously (no inter-line delays).
 
-    Stage 1 logs are replayed on creation (the row is already at stage_1_complete
-    in the DB). Stage 9 (Exception Router) only fires on failure; happy path skips it.
+    Called from the POST handler so the customer-facing logs are already
+    persisted before the response returns. The detail page lands on a
+    populated log list instead of "waiting for the agent…".
+    """
+    for _delay, level, template in STAGE_SCRIPTS.get(1, []):
+        await _emit_log(app_id, 1, level, template)
+
+
+async def run_stages(app_id: uuid.UUID) -> None:
+    """Drive an application through stages 2..8 with live logs + state broadcasts.
+
+    Stage 1 logs are emitted synchronously by the POST handler before this
+    runner is scheduled. Stage 9 (Exception Router) only fires on failure;
+    the happy path skips it.
     """
     try:
-        # Stage 1 logs — narrate what just happened in the POST handler.
-        await _play_stage(app_id, 1)
-        await _broadcast_application(app_id)
-
         await asyncio.sleep(INITIAL_DELAY_S)
 
         for stage in (2, 3, 4, 5, 6, 7, 8):

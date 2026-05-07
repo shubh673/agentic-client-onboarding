@@ -22,7 +22,7 @@ from app.database import SessionLocal, get_db
 from app.models import Application, ApplicationDocument, ApplicationLog
 from app.schemas import ApplicationCreate, ApplicationResponse, LogEntryResponse
 from app.utils.files import save_upload
-from app.utils.stage_runner import run_stages, schedule
+from app.utils.stage_runner import emit_initial_logs, run_stages, schedule
 from app.utils.ws_manager import manager as ws_manager
 
 router = APIRouter(prefix="/applications", tags=["applications"])
@@ -94,6 +94,10 @@ async def create_application(
 
     await db.commit()
     await db.refresh(application, ["documents"])
+
+    # Persist Stage 1 logs before responding so the detail page that the client
+    # is about to navigate to lands on a non-empty log list.
+    await emit_initial_logs(application.id)
 
     # Kick off the agent simulation in the background. Each stage transition is
     # persisted and broadcast over WebSocket to anyone watching this application.
