@@ -57,3 +57,14 @@ class ApplicationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     documents: list[DocumentResponse] = []
+
+
+class LogEntryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    application_id: uuid.UUID
+    stage: int
+    level: str
+    message: str
+    ts: datetime

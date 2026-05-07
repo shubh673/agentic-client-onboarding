@@ -48,12 +48,6 @@ export function Sidebar() {
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
           The onboarding agent automates KYC, eligibility, and account setup in a single flow.
         </p>
-        <div className="mt-3 flex gap-1.5">
-          <span className="size-7 rounded-md bg-foreground/80" />
-          <span className="size-7 rounded-md bg-foreground/40" />
-          <span className="size-7 rounded-md bg-muted-foreground/30" />
-          <span className="size-7 rounded-md bg-muted" />
-        </div>
       </div>
 
       <div className="border-t p-3">

@@ -21,10 +21,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StepCard } from "@/components/StepCard";
+import { LiveLogs } from "@/components/LiveLogs";
 import {
   getApplication,
+  getApplicationLogs,
   openApplicationSocket,
   type Application,
+  type LogEntry,
 } from "@/lib/api";
 
 type Status = "active" | "complete" | "locked";
@@ -126,6 +129,7 @@ function describe(idx1: number, stage: StageMeta, app: Application, status: Stat
 export function ApplicationDetail() {
   const { id } = useParams<{ id: string }>();
   const [app, setApp] = useState<Application | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
@@ -134,9 +138,11 @@ export function ApplicationDetail() {
     if (!id) return;
     let cancelled = false;
 
-    getApplication(id)
-      .then((data) => {
-        if (!cancelled) setApp(data);
+    Promise.all([getApplication(id), getApplicationLogs(id)])
+      .then(([appData, logEntries]) => {
+        if (cancelled) return;
+        setApp(appData);
+        setLogs(logEntries);
       })
       .catch((e) => {
         if (!cancelled) setError(e?.response?.data?.detail ?? e?.message ?? "Failed to load");
@@ -145,6 +151,10 @@ export function ApplicationDetail() {
     const ws = openApplicationSocket(id, (event) => {
       if (event.type === "application_update") {
         setApp(event.application);
+      } else if (event.type === "log_appended") {
+        setLogs((prev) =>
+          prev.some((entry) => entry.id === event.log.id) ? prev : [...prev, event.log],
+        );
       }
     });
     wsRef.current = ws;
@@ -258,6 +268,10 @@ export function ApplicationDetail() {
             </StepCard>
           );
         })}
+      </div>
+
+      <div className="mt-4">
+        <LiveLogs logs={logs} />
       </div>
     </div>
   );

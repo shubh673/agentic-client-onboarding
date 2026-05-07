@@ -47,3 +47,16 @@ class ApplicationDocument(Base):
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     application: Mapped[Application] = relationship(back_populates="documents")
+
+
+class ApplicationLog(Base):
+    __tablename__ = "application_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    application_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    stage: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    level: Mapped[str] = mapped_column(String(16), nullable=False, default="info")
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

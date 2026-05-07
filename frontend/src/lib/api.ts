@@ -30,10 +30,20 @@ export type Application = {
   documents: ApplicationDocument[];
 };
 
-export type ApplicationEvent = {
-  type: "application_update";
-  application: Application;
+export type LogLevel = "info" | "success" | "error";
+
+export type LogEntry = {
+  id: string;
+  application_id: string;
+  stage: number;
+  level: LogLevel;
+  message: string;
+  ts: string;
 };
+
+export type ApplicationEvent =
+  | { type: "application_update"; application: Application }
+  | { type: "log_appended"; log: LogEntry };
 
 export async function listApplications(): Promise<Application[]> {
   const { data } = await api.get<Application[]>("/applications");
@@ -42,6 +52,11 @@ export async function listApplications(): Promise<Application[]> {
 
 export async function getApplication(id: string): Promise<Application> {
   const { data } = await api.get<Application>(`/applications/${id}`);
+  return data;
+}
+
+export async function getApplicationLogs(id: string): Promise<LogEntry[]> {
+  const { data } = await api.get<LogEntry[]>(`/applications/${id}/logs`);
   return data;
 }
 

@@ -19,8 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import SessionLocal, get_db
-from app.models import Application, ApplicationDocument
-from app.schemas import ApplicationCreate, ApplicationResponse
+from app.models import Application, ApplicationDocument, ApplicationLog
+from app.schemas import ApplicationCreate, ApplicationResponse, LogEntryResponse
 from app.utils.files import save_upload
 from app.utils.stage_runner import run_stages, schedule
 from app.utils.ws_manager import manager as ws_manager
@@ -144,6 +144,18 @@ async def get_application(application_id: uuid.UUID, db: AsyncSession = Depends(
     if application is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
     return ApplicationResponse.model_validate(application)
+
+
+@router.get("/{application_id}/logs", response_model=list[LogEntryResponse])
+async def list_application_logs(
+    application_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> list[LogEntryResponse]:
+    result = await db.execute(
+        select(ApplicationLog)
+        .where(ApplicationLog.application_id == application_id)
+        .order_by(ApplicationLog.ts.asc())
+    )
+    return [LogEntryResponse.model_validate(row) for row in result.scalars().all()]
 
 
 @router.get("/{application_id}/documents/{doc_type}")
