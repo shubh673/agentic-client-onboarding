@@ -11,7 +11,6 @@ import {
   FileSignature,
   CreditCard,
   Sparkles,
-  AlertTriangle,
   ArrowRight,
   Loader2,
   Wifi,
@@ -87,20 +86,12 @@ const STAGES = [
     pendingCopy: "Pending welcome.",
     icon: Sparkles,
   },
-  {
-    title: "Exception Router",
-    description: "Diverts complex cases to humans with a full context package.",
-    icon: AlertTriangle,
-  },
 ] as const;
 
 type StageMeta = (typeof STAGES)[number];
 
 function statusFor(idx1: number, app: Application): Status {
-  if (app.status === "completed") {
-    if (idx1 === 9) return "locked";
-    return "complete";
-  }
+  if (app.status === "completed") return "complete";
   if (idx1 < app.current_stage) return "complete";
   if (idx1 === app.current_stage) return "active";
   return "locked";
@@ -113,9 +104,6 @@ function isRunning(idx1: number, app: Application): boolean {
 function describe(idx1: number, stage: StageMeta, app: Application, status: Status): string {
   if (status === "complete") return stage.description;
   if (status === "locked") {
-    if (idx1 === 9 && app.status === "completed") {
-      return "Skipped — only invoked when an earlier stage fails.";
-    }
     return "Complete the section above to continue with this step.";
   }
   // active
@@ -212,7 +200,7 @@ export function ApplicationDetail() {
               <span className="font-medium text-foreground">Customer Onboarding</span>
             </span>
             <Badge variant="default">
-              Stage {Math.min(app.current_stage, 9)} · {app.status.replaceAll("_", " ")}
+              Stage {Math.min(app.current_stage, 8)} · {app.status.replaceAll("_", " ")}
             </Badge>
             <span
               className={

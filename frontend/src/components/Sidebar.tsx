@@ -1,10 +1,17 @@
 import { NavLink } from "react-router-dom";
-import { FilePlus2, ListChecks, ShieldCheck, ChevronDown } from "lucide-react";
+import {
+  FilePlus2,
+  ListChecks,
+  ShieldCheck,
+  ChevronDown,
+  ClipboardCheck,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { to: "/", label: "My applications", icon: ListChecks, enabled: true },
   { to: "/new", label: "New application", icon: FilePlus2, enabled: true },
+  { to: "/manual-review", label: "Manual review", icon: ClipboardCheck, enabled: true },
 ];
 
 export function Sidebar() {

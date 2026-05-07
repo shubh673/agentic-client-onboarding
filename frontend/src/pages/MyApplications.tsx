@@ -67,7 +67,7 @@ export function MyApplications() {
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-3">
-              <Badge variant="default">Stage {a.current_stage} / 9</Badge>
+              <Badge variant="default">Stage {Math.min(a.current_stage, 8)} / 8</Badge>
               <Button asChild variant="ghost" size="sm">
                 <Link to={`/applications/${a.id}`}>
                   Open <ArrowRight className="size-3.5" />

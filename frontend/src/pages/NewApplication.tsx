@@ -11,7 +11,6 @@ import {
   FileSignature,
   CreditCard,
   Sparkles,
-  AlertTriangle,
   ArrowRight,
 } from "lucide-react";
 
@@ -63,11 +62,6 @@ const STAGES = [
     title: "Welcome",
     description: "Account details, card dispatch trigger, and app activation.",
     icon: Sparkles,
-  },
-  {
-    title: "Exception Router",
-    description: "Diverts complex cases to humans with a full context package.",
-    icon: AlertTriangle,
   },
 ] as const;
 
