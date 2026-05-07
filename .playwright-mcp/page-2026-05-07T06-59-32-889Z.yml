@@ -1,0 +1,172 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e6]:
+        - img [ref=e8]
+        - generic [ref=e11]:
+          - paragraph [ref=e12]: onboard
+          - paragraph [ref=e13]: agent
+      - navigation [ref=e14]:
+        - link "My applications" [ref=e15] [cursor=pointer]:
+          - /url: /
+          - img [ref=e16]
+          - generic [ref=e19]: My applications
+        - link "New application" [ref=e20] [cursor=pointer]:
+          - /url: /new
+          - img [ref=e21]
+          - generic [ref=e24]: New application
+        - generic "Coming soon" [ref=e25]:
+          - img [ref=e26]
+          - generic [ref=e31]: Automatic renewals
+        - generic "Coming soon" [ref=e32]:
+          - img [ref=e33]
+          - generic [ref=e38]: My people
+        - generic "Coming soon" [ref=e39]:
+          - img [ref=e40]
+          - generic [ref=e43]: My vault
+        - generic "Coming soon" [ref=e44]:
+          - img [ref=e45]
+          - generic [ref=e47]: Onboard+
+      - generic [ref=e48]:
+        - paragraph [ref=e49]: Make onboarding easier
+        - paragraph [ref=e50]: The onboarding agent automates KYC, eligibility, and account setup in a single flow.
+      - button "DU Demo User Customer" [ref=e57] [cursor=pointer]:
+        - generic [ref=e58]: DU
+        - generic [ref=e59]:
+          - paragraph [ref=e60]: Demo User
+          - paragraph [ref=e61]: Customer
+        - img [ref=e62]
+    - main [ref=e64]:
+      - generic [ref=e84]:
+        - link "Go back" [ref=e85] [cursor=pointer]:
+          - /url: /
+          - img [ref=e86]
+          - text: Go back
+        - generic [ref=e88]:
+          - generic [ref=e89]:
+            - heading "Hazel Mannion" [level=1] [ref=e327]
+            - paragraph [ref=e91]:
+              - text: "Application: Customer Onboarding"
+              - generic [ref=e328]: Stage 2 · stage 1 complete
+          - button "Need help? Schedule call" [ref=e92] [cursor=pointer]:
+            - img [ref=e93]
+            - text: Need help? Schedule call
+        - generic [ref=e96]:
+          - generic [ref=e97]:
+            - generic "Step 1 complete" [ref=e329]:
+              - img [ref=e330]
+            - generic [ref=e103]:
+              - generic [ref=e104]:
+                - generic [ref=e105]:
+                  - img [ref=e107]
+                  - generic [ref=e110]:
+                    - paragraph [ref=e111]: Step 1
+                    - heading "Customer Application Initiation" [level=3] [ref=e112]
+                    - paragraph [ref=e113]: Capture full name, contact details, and identity documents (PAN, Aadhaar).
+                - generic [ref=e115]:
+                  - img [ref=e332]
+                  - text: Complete
+              - generic [ref=e334]:
+                - generic [ref=e335]:
+                  - term [ref=e336]: Full name
+                  - definition [ref=e337]: Hazel Mannion
+                - generic [ref=e338]:
+                  - term [ref=e339]: DOB
+                  - definition [ref=e340]: 1990-04-12
+                - generic [ref=e341]:
+                  - term [ref=e342]: Mobile
+                  - definition [ref=e343]: +91 98765 43210
+                - generic [ref=e344]:
+                  - term [ref=e345]: Email
+                  - definition [ref=e346]: hazel@example.com
+                - generic [ref=e347]:
+                  - term [ref=e348]: PAN
+                  - definition [ref=e349]: ABCDE1234F
+                - generic [ref=e350]:
+                  - term [ref=e351]: Aadhaar
+                  - definition [ref=e352]: xxxx xxxx 1234
+                - generic [ref=e353]:
+                  - term [ref=e354]: Documents
+                  - definition [ref=e355]: 2 uploaded
+          - generic [ref=e159]:
+            - generic "Step 2 active" [ref=e356]:
+              - generic [ref=e357]: "2"
+            - generic [ref=e168]:
+              - generic [ref=e169]:
+                - img [ref=e171]
+                - generic [ref=e176]:
+                  - paragraph [ref=e177]: Step 2
+                  - heading "Document Verification" [level=3] [ref=e178]
+                  - paragraph [ref=e179]: ID validation, liveness check, and document authenticity scoring.
+              - generic [ref=e358]:
+                - button "Awaiting agent" [disabled]
+          - generic [ref=e180]:
+            - generic "Step 3 locked" [ref=e182]:
+              - img [ref=e183]
+            - generic [ref=e190]:
+              - img [ref=e192]
+              - generic [ref=e195]:
+                - paragraph [ref=e196]: Step 3
+                - heading "KYC Agent" [level=3] [ref=e197]
+                - paragraph [ref=e198]: Complete the section above to continue with this step
+          - generic [ref=e199]:
+            - generic "Step 4 locked" [ref=e201]:
+              - img [ref=e202]
+            - generic [ref=e209]:
+              - img [ref=e211]
+              - generic [ref=e214]:
+                - paragraph [ref=e215]: Step 4
+                - heading "Eligibility" [level=3] [ref=e216]
+                - paragraph [ref=e217]: Complete the section above to continue with this step
+          - generic [ref=e218]:
+            - generic "Step 5 locked" [ref=e220]:
+              - img [ref=e221]
+            - generic [ref=e228]:
+              - img [ref=e230]
+              - generic [ref=e233]:
+                - paragraph [ref=e234]: Step 5
+                - heading "Pricing" [level=3] [ref=e235]
+                - paragraph [ref=e236]: Complete the section above to continue with this step
+          - generic [ref=e237]:
+            - generic "Step 6 locked" [ref=e239]:
+              - img [ref=e240]
+            - generic [ref=e247]:
+              - img [ref=e249]
+              - generic [ref=e252]:
+                - paragraph [ref=e253]: Step 6
+                - heading "Regulatory Disclosure" [level=3] [ref=e254]
+                - paragraph [ref=e255]: Complete the section above to continue with this step
+          - generic [ref=e256]:
+            - generic "Step 7 locked" [ref=e258]:
+              - img [ref=e259]
+            - generic [ref=e266]:
+              - img [ref=e268]
+              - generic [ref=e270]:
+                - paragraph [ref=e271]: Step 7
+                - heading "Account Creation" [level=3] [ref=e272]
+                - paragraph [ref=e273]: Complete the section above to continue with this step
+          - generic [ref=e274]:
+            - generic "Step 8 locked" [ref=e276]:
+              - img [ref=e277]
+            - generic [ref=e284]:
+              - img [ref=e286]
+              - generic [ref=e288]:
+                - paragraph [ref=e289]: Step 8
+                - heading "Welcome" [level=3] [ref=e290]
+                - paragraph [ref=e291]: Complete the section above to continue with this step
+          - generic [ref=e292]:
+            - generic "Step 9 locked" [ref=e294]:
+              - img [ref=e295]
+            - generic [ref=e301]:
+              - img [ref=e303]
+              - generic [ref=e305]:
+                - paragraph [ref=e306]: Step 9
+                - heading "Exception Router" [level=3] [ref=e307]
+                - paragraph [ref=e308]: Complete the section above to continue with this step
+  - region "Notifications alt+T":
+    - list:
+      - listitem [ref=e359]:
+        - img [ref=e361]
+        - generic [ref=e363]:
+          - generic [ref=e364]: Application submitted
+          - generic [ref=e365]: Welcome, Hazel Mannion. Stage 1 complete.

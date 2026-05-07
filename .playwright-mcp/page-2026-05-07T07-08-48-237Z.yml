@@ -1,0 +1,175 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - complementary [ref=e4]:
+      - generic [ref=e6]:
+        - img [ref=e8]
+        - generic [ref=e11]:
+          - paragraph [ref=e12]: onboard
+          - paragraph [ref=e13]: agent
+      - navigation [ref=e14]:
+        - link "My applications" [ref=e15] [cursor=pointer]:
+          - /url: /
+          - img [ref=e16]
+          - generic [ref=e19]: My applications
+        - link "New application" [ref=e20] [cursor=pointer]:
+          - /url: /new
+          - img [ref=e21]
+          - generic [ref=e24]: New application
+        - generic "Coming soon" [ref=e25]:
+          - img [ref=e26]
+          - generic [ref=e31]: Automatic renewals
+        - generic "Coming soon" [ref=e32]:
+          - img [ref=e33]
+          - generic [ref=e38]: My people
+        - generic "Coming soon" [ref=e39]:
+          - img [ref=e40]
+          - generic [ref=e43]: My vault
+        - generic "Coming soon" [ref=e44]:
+          - img [ref=e45]
+          - generic [ref=e47]: Onboard+
+      - generic [ref=e48]:
+        - paragraph [ref=e49]: Make onboarding easier
+        - paragraph [ref=e50]: The onboarding agent automates KYC, eligibility, and account setup in a single flow.
+      - button "DU Demo User Customer" [ref=e57] [cursor=pointer]:
+        - generic [ref=e58]: DU
+        - generic [ref=e59]:
+          - paragraph [ref=e60]: Demo User
+          - paragraph [ref=e61]: Customer
+        - img [ref=e62]
+    - main [ref=e64]:
+      - generic [ref=e65]:
+        - link "Go back" [ref=e66] [cursor=pointer]:
+          - /url: /
+          - img [ref=e67]
+          - text: Go back
+        - generic [ref=e69]:
+          - generic [ref=e70]:
+            - heading "New customer" [level=1] [ref=e71]
+            - generic [ref=e73]: "Application: Customer Onboarding"
+          - button "Need help? Schedule call" [ref=e74] [cursor=pointer]:
+            - img [ref=e75]
+            - text: Need help? Schedule call
+        - generic [ref=e78]:
+          - generic [ref=e79]:
+            - generic "Step 1 active" [ref=e81]:
+              - generic [ref=e82]: "1"
+            - generic [ref=e85]:
+              - generic [ref=e86]:
+                - generic [ref=e87]:
+                  - img [ref=e89]
+                  - generic [ref=e92]:
+                    - paragraph [ref=e93]: Step 1
+                    - heading "Customer Application Initiation" [level=3] [ref=e94]
+                    - paragraph [ref=e95]: Capture full name, contact details, and identity documents (PAN, Aadhaar).
+                - generic [ref=e97]: In progress
+              - generic [ref=e99]:
+                - generic [ref=e100]:
+                  - progressbar [ref=e101]
+                  - generic [ref=e103]: 0%
+                - generic [ref=e104]:
+                  - generic [ref=e105]:
+                    - text: Full name
+                    - textbox "Hazel Mannion" [ref=e106]
+                  - generic [ref=e107]:
+                    - text: Date of birth
+                    - textbox [ref=e108]
+                  - generic [ref=e109]:
+                    - text: Mobile
+                    - textbox "+91 98765 43210" [ref=e110]
+                  - generic [ref=e111]:
+                    - text: Email
+                    - textbox "hazel@example.com" [ref=e112]
+                  - generic [ref=e114]:
+                    - text: Address
+                    - textbox "221B Baker Street, …" [ref=e115]
+                  - generic [ref=e116]:
+                    - text: PAN number
+                    - textbox "ABCDE1234F" [ref=e117]
+                  - generic [ref=e118]:
+                    - text: Aadhaar number
+                    - textbox "1234 1234 1234" [ref=e119]
+                - generic [ref=e120]:
+                  - button "Upload PAN card JPG, PNG, or PDF · up to 5 MB" [ref=e122] [cursor=pointer]:
+                    - img [ref=e124]
+                    - generic [ref=e127]:
+                      - paragraph [ref=e128]: Upload PAN card
+                      - paragraph [ref=e129]: JPG, PNG, or PDF · up to 5 MB
+                  - button "Upload Aadhaar card JPG, PNG, or PDF · up to 5 MB" [ref=e131] [cursor=pointer]:
+                    - img [ref=e133]
+                    - generic [ref=e136]:
+                      - paragraph [ref=e137]: Upload Aadhaar card
+                      - paragraph [ref=e138]: JPG, PNG, or PDF · up to 5 MB
+                - button "Submit application" [ref=e140] [cursor=pointer]
+          - generic [ref=e141]:
+            - generic "Step 2 locked" [ref=e143]:
+              - img [ref=e144]
+            - generic [ref=e151]:
+              - img [ref=e153]
+              - generic [ref=e158]:
+                - paragraph [ref=e159]: Step 2
+                - heading "Document Verification" [level=3] [ref=e160]
+                - paragraph [ref=e161]: Complete the section above to continue with this step
+          - generic [ref=e162]:
+            - generic "Step 3 locked" [ref=e164]:
+              - img [ref=e165]
+            - generic [ref=e172]:
+              - img [ref=e174]
+              - generic [ref=e177]:
+                - paragraph [ref=e178]: Step 3
+                - heading "KYC Agent" [level=3] [ref=e179]
+                - paragraph [ref=e180]: Complete the section above to continue with this step
+          - generic [ref=e181]:
+            - generic "Step 4 locked" [ref=e183]:
+              - img [ref=e184]
+            - generic [ref=e191]:
+              - img [ref=e193]
+              - generic [ref=e196]:
+                - paragraph [ref=e197]: Step 4
+                - heading "Eligibility" [level=3] [ref=e198]
+                - paragraph [ref=e199]: Complete the section above to continue with this step
+          - generic [ref=e200]:
+            - generic "Step 5 locked" [ref=e202]:
+              - img [ref=e203]
+            - generic [ref=e210]:
+              - img [ref=e212]
+              - generic [ref=e215]:
+                - paragraph [ref=e216]: Step 5
+                - heading "Pricing" [level=3] [ref=e217]
+                - paragraph [ref=e218]: Complete the section above to continue with this step
+          - generic [ref=e219]:
+            - generic "Step 6 locked" [ref=e221]:
+              - img [ref=e222]
+            - generic [ref=e229]:
+              - img [ref=e231]
+              - generic [ref=e234]:
+                - paragraph [ref=e235]: Step 6
+                - heading "Regulatory Disclosure" [level=3] [ref=e236]
+                - paragraph [ref=e237]: Complete the section above to continue with this step
+          - generic [ref=e238]:
+            - generic "Step 7 locked" [ref=e240]:
+              - img [ref=e241]
+            - generic [ref=e248]:
+              - img [ref=e250]
+              - generic [ref=e252]:
+                - paragraph [ref=e253]: Step 7
+                - heading "Account Creation" [level=3] [ref=e254]
+                - paragraph [ref=e255]: Complete the section above to continue with this step
+          - generic [ref=e256]:
+            - generic "Step 8 locked" [ref=e258]:
+              - img [ref=e259]
+            - generic [ref=e266]:
+              - img [ref=e268]
+              - generic [ref=e270]:
+                - paragraph [ref=e271]: Step 8
+                - heading "Welcome" [level=3] [ref=e272]
+                - paragraph [ref=e273]: Complete the section above to continue with this step
+          - generic [ref=e274]:
+            - generic "Step 9 locked" [ref=e276]:
+              - img [ref=e277]
+            - generic [ref=e283]:
+              - img [ref=e285]
+              - generic [ref=e287]:
+                - paragraph [ref=e288]: Step 9
+                - heading "Exception Router" [level=3] [ref=e289]
+                - paragraph [ref=e290]: Complete the section above to continue with this step
+  - region "Notifications alt+T"

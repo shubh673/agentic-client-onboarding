@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: onboarding-postgres
+    environment:
+      POSTGRES_USER: onboarding
+      POSTGRES_PASSWORD: onboarding
+      POSTGRES_DB: onboarding
+    ports:
+      - "5433:5432"   # host 5432 is occupied by another postgres on this machine
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onboarding -d onboarding"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - onboarding-net
+
+  postgres-mcp:
+    image: crystaldba/postgres-mcp
+    container_name: onboarding-postgres-mcp
+    command: ["--transport=sse", "--access-mode=unrestricted"]
+    environment:
+      DATABASE_URI: postgresql://onboarding:onboarding@postgres:5432/onboarding
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - onboarding-net
+
+volumes:
+  pg_data:
+
+networks:
+  onboarding-net:
+    driver: bridge
