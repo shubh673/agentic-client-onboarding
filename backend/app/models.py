@@ -21,6 +21,7 @@ class Application(Base):
     aadhaar_number: Mapped[str] = mapped_column(String(12), nullable=False)
     current_stage: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="in_progress")
+    verification_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -41,7 +42,7 @@ class ApplicationDocument(Base):
     )
     doc_type: Mapped[str] = mapped_column(String(20), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
-    stored_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    s3_key: Mapped[str] = mapped_column(String(500), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

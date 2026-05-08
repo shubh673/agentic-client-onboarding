@@ -1,12 +1,14 @@
 import asyncio
 import logging
+import re
 import uuid
 
 from sqlalchemy import select
 
 from app.database import SessionLocal
-from app.models import Application, ApplicationLog
+from app.models import Application, ApplicationDocument, ApplicationLog
 from app.schemas import ApplicationResponse, LogEntryResponse
+from app.utils.aws import detect_text
 from app.utils.ws_manager import manager
 
 logger = logging.getLogger(__name__)
@@ -36,16 +38,8 @@ STAGE_SCRIPTS: dict[int, StageScript] = {
         (0.4, "success", "Identity documents uploaded: PAN ({pan_masked}), Aadhaar ({aadhaar_masked})"),
         (0.4, "success", "Stage 1 complete — handing off to Document Verification agent"),
     ],
-    2: [
-        (0.4, "info", "Document Verification agent invoked"),
-        (0.7, "info", "Running OCR on PAN card image"),
-        (0.6, "success", "PAN format valid: {pan_masked}"),
-        (0.6, "info", "Running OCR on Aadhaar image"),
-        (0.6, "success", "Aadhaar checksum valid: {aadhaar_masked}"),
-        (0.6, "info", "Liveness and tamper checks in progress"),
-        (0.8, "success", "Document authenticity score: 0.94"),
-        (0.4, "success", "Stage 2 complete — handing off to KYC agent"),
-    ],
+    # Stage 2 is implemented programmatically in _play_stage_2 — it runs real
+    # Textract OCR and compares against the user-entered numbers.
     3: [
         (0.4, "info", "KYC agent invoked"),
         (0.7, "info", "Sanctions list screening (OFAC, UN, EU)"),
@@ -145,7 +139,14 @@ async def _emit_log(app_id: uuid.UUID, stage: int, level: str, template: str) ->
     await manager.broadcast(str(app_id), {"type": "log_appended", "log": payload})
 
 
-async def _set_status(app_id: uuid.UUID, *, current_stage: int, status: str) -> None:
+async def _set_status(
+    app_id: uuid.UUID,
+    *,
+    current_stage: int,
+    status: str,
+    verification_reason: str | None = None,
+    clear_verification_reason: bool = False,
+) -> None:
     async with SessionLocal() as db:
         result = await db.execute(select(Application).where(Application.id == app_id))
         app = result.scalar_one_or_none()
@@ -153,6 +154,10 @@ async def _set_status(app_id: uuid.UUID, *, current_stage: int, status: str) -> 
             return
         app.current_stage = current_stage
         app.status = status
+        if clear_verification_reason:
+            app.verification_reason = None
+        elif verification_reason is not None:
+            app.verification_reason = verification_reason
         await db.commit()
 
 
@@ -174,29 +179,156 @@ async def emit_initial_logs(app_id: uuid.UUID) -> None:
         await _emit_log(app_id, 1, level, template)
 
 
+async def _load_app_with_docs(app_id: uuid.UUID) -> Application | None:
+    async with SessionLocal() as db:
+        result = await db.execute(select(Application).where(Application.id == app_id))
+        app = result.scalar_one_or_none()
+        if app is None:
+            return None
+        await db.refresh(app, ["documents"])
+        return app
+
+
+def _verify_pan(text: str, expected_pan: str) -> bool:
+    """Expected PAN (10 chars, A-Z & 0-9) must appear as a substring of the OCR text after upper+strip-non-alnum."""
+    cleaned = re.sub(r"[^A-Z0-9]", "", text.upper())
+    return expected_pan.upper() in cleaned
+
+
+def _verify_aadhaar(text: str, expected_aadhaar: str) -> bool:
+    """Aadhaar OCR is often spaced as '1234 5678 9012'; full match preferred, last-4 fallback."""
+    digits = re.sub(r"\D", "", text)
+    return expected_aadhaar in digits or expected_aadhaar[-4:] in digits
+
+
+async def _play_stage_2(app_id: uuid.UUID) -> bool:
+    """Run Textract OCR on the PAN and Aadhaar S3 objects and compare against the
+    user-entered numbers. Emits live logs as it goes. Returns True on pass."""
+    await _emit_log(app_id, 2, "info", "Document Verification agent invoked")
+
+    app = await _load_app_with_docs(app_id)
+    if app is None:
+        return False
+
+    docs: dict[str, ApplicationDocument] = {d.doc_type: d for d in app.documents}
+    if "pan" not in docs or "aadhaar" not in docs:
+        reason = "Missing PAN or Aadhaar document"
+        await _emit_log(app_id, 2, "error", reason)
+        await _set_status(
+            app_id,
+            current_stage=2,
+            status="stage_2_failed",
+            verification_reason=reason,
+        )
+        return False
+
+    failures: list[str] = []
+
+    await _emit_log(app_id, 2, "info", "Running Textract OCR on PAN card")
+    try:
+        pan_text = await asyncio.to_thread(detect_text, docs["pan"].s3_key)
+    except Exception as e:
+        logger.exception("Textract failed on PAN for %s", app_id)
+        reason = f"OCR failed on PAN card: {e}"
+        await _emit_log(app_id, 2, "error", reason)
+        failures.append(reason)
+    else:
+        if _verify_pan(pan_text, app.pan_number):
+            await _emit_log(
+                app_id, 2, "success", f"PAN number matched on uploaded PAN card ({_mask_pan(app.pan_number)})"
+            )
+        else:
+            reason = f"PAN number {_mask_pan(app.pan_number)} not found on uploaded PAN card"
+            await _emit_log(app_id, 2, "error", reason)
+            failures.append(reason)
+
+    await _emit_log(app_id, 2, "info", "Running Textract OCR on Aadhaar card")
+    try:
+        aadhaar_text = await asyncio.to_thread(detect_text, docs["aadhaar"].s3_key)
+    except Exception as e:
+        logger.exception("Textract failed on Aadhaar for %s", app_id)
+        reason = f"OCR failed on Aadhaar card: {e}"
+        await _emit_log(app_id, 2, "error", reason)
+        failures.append(reason)
+    else:
+        if _verify_aadhaar(aadhaar_text, app.aadhaar_number):
+            await _emit_log(
+                app_id,
+                2,
+                "success",
+                f"Aadhaar number matched on uploaded Aadhaar card ({_mask_aadhaar(app.aadhaar_number)})",
+            )
+        else:
+            reason = f"Aadhaar number {_mask_aadhaar(app.aadhaar_number)} not found on uploaded Aadhaar card"
+            await _emit_log(app_id, 2, "error", reason)
+            failures.append(reason)
+
+    if failures:
+        combined = "; ".join(failures)
+        await _emit_log(app_id, 2, "error", "Stage 2 failed — re-upload required")
+        await _set_status(
+            app_id,
+            current_stage=2,
+            status="stage_2_failed",
+            verification_reason=combined,
+        )
+        return False
+
+    await _emit_log(app_id, 2, "success", "Stage 2 complete — handing off to KYC agent")
+    return True
+
+
+async def _run_stage_2_and_after(app_id: uuid.UUID) -> None:
+    """Stage 2 (real OCR) followed by stages 3..8. Used by both the fresh-application
+    path and the re-upload path. Halts at stage_2_failed; does not retry."""
+    await _set_status(app_id, current_stage=2, status="stage_2_running", clear_verification_reason=True)
+    await _broadcast_application(app_id)
+
+    passed = await _play_stage_2(app_id)
+    if not passed:
+        # _play_stage_2 already wrote stage_2_failed + verification_reason.
+        await _broadcast_application(app_id)
+        return
+
+    await _set_status(app_id, current_stage=3, status="stage_2_complete")
+    await _broadcast_application(app_id)
+    await asyncio.sleep(0.4)
+
+    for stage in (3, 4, 5, 6, 7, 8):
+        await _set_status(app_id, current_stage=stage, status=f"stage_{stage}_running")
+        await _broadcast_application(app_id)
+        await _play_stage(app_id, stage)
+        await _set_status(
+            app_id, current_stage=stage + 1, status=f"stage_{stage}_complete"
+        )
+        await _broadcast_application(app_id)
+        await asyncio.sleep(0.4)
+
+    await _set_status(app_id, current_stage=9, status="completed")
+    await _broadcast_application(app_id)
+
+
 async def run_stages(app_id: uuid.UUID) -> None:
     """Drive an application through stages 2..8 with live logs + state broadcasts.
 
     Stage 1 logs are emitted synchronously by the POST handler before this
-    runner is scheduled. Stage 9 (Exception Router) only fires on failure;
-    the happy path skips it.
+    runner is scheduled. Stage 2 runs real Textract OCR; on mismatch the runner
+    halts at stage_2_failed and the UI invites the user to re-upload.
     """
     try:
         await asyncio.sleep(INITIAL_DELAY_S)
-
-        for stage in (2, 3, 4, 5, 6, 7, 8):
-            await _set_status(app_id, current_stage=stage, status=f"stage_{stage}_running")
-            await _broadcast_application(app_id)
-            await _play_stage(app_id, stage)
-            await _set_status(
-                app_id, current_stage=stage + 1, status=f"stage_{stage}_complete"
-            )
-            await _broadcast_application(app_id)
-            await asyncio.sleep(0.4)
-
-        await _set_status(app_id, current_stage=9, status="completed")
-        await _broadcast_application(app_id)
+        await _run_stage_2_and_after(app_id)
     except asyncio.CancelledError:
         raise
     except Exception:
         logger.exception("stage runner failed for application %s", app_id)
+
+
+async def rerun_from_stage_2(app_id: uuid.UUID) -> None:
+    """Re-run Stage 2 (and continuation) after the customer re-uploads."""
+    try:
+        await _run_stage_2_and_after(app_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("stage 2 rerun failed for application %s", app_id)

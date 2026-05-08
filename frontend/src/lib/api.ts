@@ -25,6 +25,7 @@ export type Application = {
   aadhaar_number: string;
   current_stage: number;
   status: string;
+  verification_reason: string | null;
   created_at: string;
   updated_at: string;
   documents: ApplicationDocument[];
@@ -62,6 +63,19 @@ export async function getApplicationLogs(id: string): Promise<LogEntry[]> {
 
 export async function createApplication(form: FormData): Promise<Application> {
   const { data } = await api.post<Application>("/applications", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
+export async function reuploadDocuments(
+  id: string,
+  files: { pan?: File | null; aadhaar?: File | null },
+): Promise<Application> {
+  const fd = new FormData();
+  if (files.pan) fd.append("pan_file", files.pan);
+  if (files.aadhaar) fd.append("aadhaar_file", files.aadhaar);
+  const { data } = await api.patch<Application>(`/applications/${id}/documents`, fd, {
     headers: { "Content-Type": "multipart/form-data" },
   });
   return data;

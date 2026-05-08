@@ -1,7 +1,9 @@
+import asyncio
 import uuid
-from pathlib import Path
 
 from fastapi import HTTPException, UploadFile, status
+
+from app.utils.aws import s3_key_for, upload_bytes
 
 ALLOWED_MIME = {"image/jpeg", "image/png", "application/pdf"}
 EXT_BY_MIME = {"image/jpeg": ".jpg", "image/png": ".png", "application/pdf": ".pdf"}
@@ -22,16 +24,15 @@ def sniff_mime(head: bytes) -> str | None:
     return None
 
 
-async def save_upload(
+async def upload_to_s3(
     upload: UploadFile,
     application_id: uuid.UUID,
     doc_type: str,
-    upload_root: Path,
     max_bytes: int,
-) -> tuple[Path, str, int]:
-    """Read, validate, and write an upload to disk.
+) -> tuple[str, str, int]:
+    """Validate the upload and put it in S3.
 
-    Returns (stored_path, sniffed_mime, size_bytes). Raises HTTPException on
+    Returns (s3_key, sniffed_mime, size_bytes). Raises HTTPException on
     oversize or disallowed file types.
     """
     data = await upload.read()
@@ -40,7 +41,10 @@ async def save_upload(
     if size == 0:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{doc_type}_file is empty")
     if size > max_bytes:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"{doc_type}_file exceeds {max_bytes} bytes")
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"{doc_type}_file exceeds {max_bytes} bytes",
+        )
 
     sniffed = sniff_mime(data[:16])
     if sniffed is None or sniffed not in ALLOWED_MIME:
@@ -49,9 +53,6 @@ async def save_upload(
             f"{doc_type}_file must be JPEG, PNG, or PDF",
         )
 
-    target_dir = upload_root / str(application_id)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / f"{doc_type}{EXT_BY_MIME[sniffed]}"
-    target_path.write_bytes(data)
-
-    return target_path, sniffed, size
+    key = s3_key_for(application_id, doc_type, EXT_BY_MIME[sniffed])
+    await asyncio.to_thread(upload_bytes, key, data, sniffed)
+    return key, sniffed, size

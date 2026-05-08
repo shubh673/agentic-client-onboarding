@@ -54,6 +54,7 @@ class ApplicationResponse(BaseModel):
     aadhaar_number: str
     current_stage: int
     status: str
+    verification_reason: str | None = None
     created_at: datetime
     updated_at: datetime
     documents: list[DocumentResponse] = []

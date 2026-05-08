@@ -1,0 +1,50 @@
+i have created the bucket now what to do ??
+Now create an IAM user with credentials and wire them into .env. Step by step:
+
+1. Create IAM user + access keys
+In AWS Console → IAM → Users → Create user:
+
+Username: onboarding-agent (anything works)
+Do not check "Provide user access to AWS Management Console" — programmatic only
+Permissions → Attach policies directly → click Create policy, paste this JSON (replace your-bucket-name):
+
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "S3Access",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::your-bucket-name/*"
+    },
+    {
+      "Sid": "TextractAccess",
+      "Effect": "Allow",
+      "Action": ["textract:DetectDocumentText"],
+      "Resource": "*"
+    }
+  ]
+}
+Name it onboarding-agent-policy, attach it to the user, finish creating.
+
+Open the new user → Security credentials tab → Create access key → choose Application running outside AWS → save the Access key ID and Secret access key (you only see the secret once).
+2. Fill in backend/.env
+Open backend/.env and add:
+
+
+AWS_REGION=ap-south-1
+AWS_S3_BUCKET=your-bucket-name
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=...
+PRESIGNED_URL_TTL_SECONDS=300
+AWS_REGION must be the region you created the bucket in (top-right of the S3 console). Textract is supported in ap-south-1, us-east-1, eu-west-1, etc. — use the same region as the bucket.
+
+3. Smoke-test the credentials
+From backend/, with your venv activated:
+
+
+python -c "from app.utils.aws import s3_client; print(s3_client().list_buckets()['Buckets'])"
+You should see your bucket in the list. If you get NoCredentialsError or AccessDenied, the .env keys are wrong or the policy didn't attach.
+
+4. After that
+Once credentials work, the next step is the code-level changes I described earlier — the router still calls a non-existent save_upload and writes stored_path, so uploads will fail before they reach S3. Want me to make those edits now (swap applications.py to upload_to_s3, fix the migration, switch document download to presigned URL)?

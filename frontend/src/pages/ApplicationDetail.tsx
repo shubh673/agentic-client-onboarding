@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  AlertTriangle,
   ChevronLeft,
   HelpCircle,
   FileText,
@@ -16,15 +17,18 @@ import {
   Wifi,
   WifiOff,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StepCard } from "@/components/StepCard";
 import { LiveLogs } from "@/components/LiveLogs";
+import { FileDropzone } from "@/components/FileDropzone";
 import {
   getApplication,
   getApplicationLogs,
   openApplicationSocket,
+  reuploadDocuments,
   type Application,
   type LogEntry,
 } from "@/lib/api";
@@ -42,6 +46,7 @@ const STAGES = [
     description: "ID validation, liveness check, and document authenticity scoring.",
     runningCopy: "Running document verification — checking authenticity and liveness…",
     pendingCopy: "Pending — about to start document verification.",
+    failedCopy: "Document verification failed — please re-upload the corrected documents.",
     icon: ScanLine,
   },
   {
@@ -92,6 +97,10 @@ type StageMeta = (typeof STAGES)[number];
 
 function statusFor(idx1: number, app: Application): Status {
   if (app.status === "completed") return "complete";
+  // A Stage 2 failure halts the runner at current_stage=2; treat it as the
+  // active card (so the re-upload panel renders inside it) until the customer
+  // re-submits and the runner advances past Stage 2.
+  if (idx1 === 2 && app.status === "stage_2_failed") return "active";
   if (idx1 < app.current_stage) return "complete";
   if (idx1 === app.current_stage) return "active";
   return "locked";
@@ -108,6 +117,9 @@ function describe(idx1: number, stage: StageMeta, app: Application, status: Stat
   }
   // active
   if (idx1 === 1) return stage.description;
+  if (idx1 === 2 && app.status === "stage_2_failed") {
+    return ("failedCopy" in stage && stage.failedCopy) || stage.description;
+  }
   if (isRunning(idx1, app)) {
     return ("runningCopy" in stage && stage.runningCopy) || stage.description;
   }
@@ -243,6 +255,13 @@ export function ApplicationDetail() {
                   <Badge variant="default" className="bg-primary text-primary-foreground">
                     <ArrowRight className="mr-0.5 size-3" /> Complete
                   </Badge>
+                ) : status === "active" && idx1 === 2 && app.status === "stage_2_failed" ? (
+                  <Badge
+                    variant="default"
+                    className="gap-1 border-destructive/30 bg-destructive/10 text-destructive"
+                  >
+                    <AlertTriangle className="size-3" /> Failed
+                  </Badge>
                 ) : status === "active" && running ? (
                   <Badge variant="default" className="gap-1">
                     <Loader2 className="size-3 animate-spin" /> Running
@@ -253,6 +272,9 @@ export function ApplicationDetail() {
               }
             >
               {idx1 === 1 && <SubmittedSummary app={app} />}
+              {idx1 === 2 && app.status === "stage_2_failed" && (
+                <ReuploadPanel app={app} />
+              )}
             </StepCard>
           );
         })}
@@ -287,6 +309,74 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between gap-4 py-0.5">
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="truncate font-medium text-foreground">{value}</dd>
+    </div>
+  );
+}
+
+function ReuploadPanel({ app }: { app: Application }) {
+  const [panFile, setPanFile] = useState<File | null>(null);
+  const [aadhaarFile, setAadhaarFile] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const onSubmit = async () => {
+    if (!panFile && !aadhaarFile) {
+      toast.error("Pick at least one document to re-upload");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await reuploadDocuments(app.id, { pan: panFile, aadhaar: aadhaarFile });
+      toast.success("Documents resubmitted", {
+        description: "Stage 2 is re-running.",
+      });
+      setPanFile(null);
+      setAadhaarFile(null);
+    } catch (err: unknown) {
+      const detail =
+        (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      toast.error("Re-upload failed", {
+        description: typeof detail === "string" ? detail : "Please try again.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+      <div className="flex items-start gap-2 text-sm text-destructive">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        <div>
+          <p className="font-medium">Verification failed</p>
+          {app.verification_reason && (
+            <p className="mt-0.5 text-destructive/90">{app.verification_reason}</p>
+          )}
+          <p className="mt-1 text-destructive/80">
+            Replace the PAN or Aadhaar image (or both) with a clearer copy and resubmit.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <FileDropzone label="Re-upload PAN card" file={panFile} onChange={setPanFile} />
+        <FileDropzone
+          label="Re-upload Aadhaar card"
+          file={aadhaarFile}
+          onChange={setAadhaarFile}
+        />
+      </div>
+
+      <div className="mt-3 flex justify-end">
+        <Button onClick={onSubmit} disabled={submitting} size="sm">
+          {submitting ? (
+            <>
+              <Loader2 className="size-4 animate-spin" /> Resubmitting…
+            </>
+          ) : (
+            <>Resubmit documents</>
+          )}
+        </Button>
+      </div>
     </div>
   );
 }
