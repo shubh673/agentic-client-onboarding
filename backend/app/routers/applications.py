@@ -179,7 +179,11 @@ async def reupload_documents(
     application.current_stage = 2
     application.verification_reason = None
     await db.commit()
-    await db.refresh(application, ["documents"])
+    # `updated_at` has onupdate=func.now() — Postgres recomputes it on UPDATE
+    # and SQLAlchemy leaves it expired. Refresh it explicitly here so the
+    # ApplicationResponse serialization doesn't trigger an async lazy load
+    # inside Pydantic's sync model_validate (MissingGreenlet).
+    await db.refresh(application, ["updated_at", "documents"])
 
     schedule(rerun_from_stage_2(application_id))
 

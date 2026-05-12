@@ -1,14 +1,14 @@
 import asyncio
 import logging
-import re
 import uuid
 
 from sqlalchemy import select
 
+from app.agents.doc_verification import DocumentVerificationAgent
+from app.agents.kyc import KYCAgent
 from app.database import SessionLocal
 from app.models import Application, ApplicationDocument, ApplicationLog
 from app.schemas import ApplicationResponse, LogEntryResponse
-from app.utils.aws import detect_text
 from app.utils.ws_manager import manager
 
 logger = logging.getLogger(__name__)
@@ -38,18 +38,8 @@ STAGE_SCRIPTS: dict[int, StageScript] = {
         (0.4, "success", "Identity documents uploaded: PAN ({pan_masked}), Aadhaar ({aadhaar_masked})"),
         (0.4, "success", "Stage 1 complete — handing off to Document Verification agent"),
     ],
-    # Stage 2 is implemented programmatically in _play_stage_2 — it runs real
-    # Textract OCR and compares against the user-entered numbers.
-    3: [
-        (0.4, "info", "KYC agent invoked"),
-        (0.7, "info", "Sanctions list screening (OFAC, UN, EU)"),
-        (0.6, "success", "Sanctions screening: clear"),
-        (0.7, "info", "PEP (politically exposed persons) screening"),
-        (0.5, "success", "PEP screening: clear"),
-        (0.6, "info", "Adverse media scan"),
-        (0.7, "success", "Adverse media: no hits"),
-        (0.4, "success", "Stage 3 complete — handing off to Eligibility agent"),
-    ],
+    # Stage 2 runs via DocumentVerificationAgent (Textract OCR + match check).
+    # Stage 3 runs via KYCAgent (dummy stub; swap in a real provider later).
     4: [
         (0.4, "info", "Eligibility agent invoked"),
         (0.6, "info", "Applying product rules"),
@@ -189,23 +179,13 @@ async def _load_app_with_docs(app_id: uuid.UUID) -> Application | None:
         return app
 
 
-def _verify_pan(text: str, expected_pan: str) -> bool:
-    """Expected PAN (10 chars, A-Z & 0-9) must appear as a substring of the OCR text after upper+strip-non-alnum."""
-    cleaned = re.sub(r"[^A-Z0-9]", "", text.upper())
-    return expected_pan.upper() in cleaned
-
-
-def _verify_aadhaar(text: str, expected_aadhaar: str) -> bool:
-    """Aadhaar OCR is often spaced as '1234 5678 9012'; full match preferred, last-4 fallback."""
-    digits = re.sub(r"\D", "", text)
-    return expected_aadhaar in digits or expected_aadhaar[-4:] in digits
-
-
 async def _play_stage_2(app_id: uuid.UUID) -> bool:
-    """Run Textract OCR on the PAN and Aadhaar S3 objects and compare against the
-    user-entered numbers. Emits live logs as it goes. Returns True on pass."""
-    await _emit_log(app_id, 2, "info", "Document Verification agent invoked")
+    """Delegate Stage 2 to DocumentVerificationAgent. Returns True on pass.
 
+    The agent is deterministic (Textract + regex; no LLM). Logs are streamed
+    live via the `_emit_log` callback so WebSocket subscribers see each step
+    as it happens.
+    """
     app = await _load_app_with_docs(app_id)
     if app is None:
         return False
@@ -222,60 +202,44 @@ async def _play_stage_2(app_id: uuid.UUID) -> bool:
         )
         return False
 
-    failures: list[str] = []
+    async def emit(stage: int, level: str, message: str) -> None:
+        await _emit_log(app_id, stage, level, message)
 
-    await _emit_log(app_id, 2, "info", "Running Textract OCR on PAN card")
-    try:
-        pan_text = await asyncio.to_thread(detect_text, docs["pan"].s3_key)
-    except Exception as e:
-        logger.exception("Textract failed on PAN for %s", app_id)
-        reason = f"OCR failed on PAN card: {e}"
-        await _emit_log(app_id, 2, "error", reason)
-        failures.append(reason)
-    else:
-        if _verify_pan(pan_text, app.pan_number):
-            await _emit_log(
-                app_id, 2, "success", f"PAN number matched on uploaded PAN card ({_mask_pan(app.pan_number)})"
-            )
-        else:
-            reason = f"PAN number {_mask_pan(app.pan_number)} not found on uploaded PAN card"
-            await _emit_log(app_id, 2, "error", reason)
-            failures.append(reason)
+    result = await DocumentVerificationAgent().run(
+        pan_number=app.pan_number,
+        aadhaar_number=app.aadhaar_number,
+        pan_s3_key=docs["pan"].s3_key,
+        aadhaar_s3_key=docs["aadhaar"].s3_key,
+        emit_log=emit,
+    )
 
-    await _emit_log(app_id, 2, "info", "Running Textract OCR on Aadhaar card")
-    try:
-        aadhaar_text = await asyncio.to_thread(detect_text, docs["aadhaar"].s3_key)
-    except Exception as e:
-        logger.exception("Textract failed on Aadhaar for %s", app_id)
-        reason = f"OCR failed on Aadhaar card: {e}"
-        await _emit_log(app_id, 2, "error", reason)
-        failures.append(reason)
-    else:
-        if _verify_aadhaar(aadhaar_text, app.aadhaar_number):
-            await _emit_log(
-                app_id,
-                2,
-                "success",
-                f"Aadhaar number matched on uploaded Aadhaar card ({_mask_aadhaar(app.aadhaar_number)})",
-            )
-        else:
-            reason = f"Aadhaar number {_mask_aadhaar(app.aadhaar_number)} not found on uploaded Aadhaar card"
-            await _emit_log(app_id, 2, "error", reason)
-            failures.append(reason)
+    if result.passed:
+        return True
 
-    if failures:
-        combined = "; ".join(failures)
-        await _emit_log(app_id, 2, "error", "Stage 2 failed — re-upload required")
-        await _set_status(
-            app_id,
-            current_stage=2,
-            status="stage_2_failed",
-            verification_reason=combined,
-        )
-        return False
+    await _set_status(
+        app_id,
+        current_stage=2,
+        status="stage_2_failed",
+        verification_reason=result.reason,
+    )
+    return False
 
-    await _emit_log(app_id, 2, "success", "Stage 2 complete — handing off to KYC agent")
-    return True
+
+async def _play_stage_3(app_id: uuid.UUID) -> None:
+    """Delegate Stage 3 to KYCAgent (dummy). Logs stream live."""
+    app = await _load_app_with_docs(app_id)
+    if app is None:
+        return
+
+    async def emit(stage: int, level: str, message: str) -> None:
+        await _emit_log(app_id, stage, level, message)
+
+    await KYCAgent().run(
+        full_name=app.full_name,
+        pan_number=app.pan_number,
+        aadhaar_number=app.aadhaar_number,
+        emit_log=emit,
+    )
 
 
 async def _run_stage_2_and_after(app_id: uuid.UUID) -> None:
@@ -297,7 +261,10 @@ async def _run_stage_2_and_after(app_id: uuid.UUID) -> None:
     for stage in (3, 4, 5, 6, 7, 8):
         await _set_status(app_id, current_stage=stage, status=f"stage_{stage}_running")
         await _broadcast_application(app_id)
-        await _play_stage(app_id, stage)
+        if stage == 3:
+            await _play_stage_3(app_id)
+        else:
+            await _play_stage(app_id, stage)
         await _set_status(
             app_id, current_stage=stage + 1, status=f"stage_{stage}_complete"
         )
