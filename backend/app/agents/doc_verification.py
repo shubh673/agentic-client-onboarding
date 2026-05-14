@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 from app.agents.tools.document_tools import (
+    OcrError,
     textract_ocr,
     verify_aadhaar_match,
     verify_pan_match,
@@ -99,7 +100,7 @@ class DocumentVerificationAgent:
         await emit_log(self.STAGE, "info", "Running Textract OCR on PAN card")
         try:
             result.pan_ocr_text = await asyncio.to_thread(textract_ocr, pan_s3_key)
-        except Exception as exc:  # noqa: BLE001 — surfaced into the result
+        except OcrError as exc:
             logger.exception("Textract failed on PAN (%s)", pan_s3_key)
             msg = f"OCR failed on PAN card: {exc}"
             result.failures.append(msg)
@@ -121,7 +122,7 @@ class DocumentVerificationAgent:
         await emit_log(self.STAGE, "info", "Running Textract OCR on Aadhaar card")
         try:
             result.aadhaar_ocr_text = await asyncio.to_thread(textract_ocr, aadhaar_s3_key)
-        except Exception as exc:  # noqa: BLE001
+        except OcrError as exc:
             logger.exception("Textract failed on Aadhaar (%s)", aadhaar_s3_key)
             msg = f"OCR failed on Aadhaar card: {exc}"
             result.failures.append(msg)

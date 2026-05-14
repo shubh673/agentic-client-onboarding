@@ -1,4 +1,4 @@
-"""AWS clients and helpers for S3 storage + Textract OCR.
+"""AWS S3 client + helpers. Textract lives in agents/tools/document_tools.py.
 
 Boto3 calls in this module are synchronous and blocking — call them from
 async code via `asyncio.to_thread` so the event loop stays responsive.
@@ -17,17 +17,6 @@ def s3_client() -> BaseClient:
     s = get_settings()
     return boto3.client(
         "s3",
-        region_name=s.AWS_REGION,
-        aws_access_key_id=s.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=s.AWS_SECRET_ACCESS_KEY,
-    )
-
-
-@lru_cache
-def textract_client() -> BaseClient:
-    s = get_settings()
-    return boto3.client(
-        "textract",
         region_name=s.AWS_REGION,
         aws_access_key_id=s.AWS_ACCESS_KEY_ID,
         aws_secret_access_key=s.AWS_SECRET_ACCESS_KEY,
@@ -54,12 +43,3 @@ def presigned_get(key: str, ttl_seconds: int) -> str:
         Params={"Bucket": get_settings().AWS_S3_BUCKET, "Key": key},
         ExpiresIn=ttl_seconds,
     )
-
-
-def detect_text(key: str) -> str:
-    """Run Textract OCR on an S3 object and return all detected lines joined by newlines."""
-    resp = textract_client().detect_document_text(
-        Document={"S3Object": {"Bucket": get_settings().AWS_S3_BUCKET, "Name": key}}
-    )
-    lines = [b["Text"] for b in resp.get("Blocks", []) if b.get("BlockType") == "LINE"]
-    return "\n".join(lines)

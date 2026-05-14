@@ -1,0 +1,9 @@
+Stage 1 (Application Trigger) — RevRag, Lorikeet, Casca. Conversational intake replacing forms, drop-off detection, consent capture in plain language.
+Stage 2 (Document Verification) — JPMorgan's DocLLM internally; HyperVerge, Signzy, Karza in India; Onfido/Sumsub/Persona globally are layering agent reasoning on top of their OCR primitives. Sardine's KYC Onboarding Agent specifically handles document edge cases like name mismatches.
+Stage 3 (KYC/AML) — The most crowded and most mature. Sardine, Bretton AI, Parcha, Axle, Diligent. This is the single highest-ROI place to deploy an agent and almost everyone is doing it.
+Stage 4 (Eligibility) — Casca for SMB lending; Pagaya, Inscribe, Addy AI for adjacent decisioning. Account Aggregator–based cash-flow underwriting in India creates a specific opening here.
+Stage 5 (Pricing) — Still mostly rule-based across the industry. Agents here are rare in production; the upside is explanation/transparency rather than dynamic pricing (which has regulatory friction).
+Stage 6 (Disclosure) — Almost nobody is doing this well with agents yet. Norm AI's reg-grounding could fit. This is a genuine whitespace if you're building.
+Stage 7 (Account Creation) — Deterministic everywhere. Agents orchestrate around it (Casca, JPM internal tooling) but don't write to core banking directly. Don't change this.
+Stage 8 (Welcome/Activation) — RevRag, Lorikeet, Fini, plus Casca for SMB. This is where neobanks lose customers and where agent ROI is rapidly being proven.
+Stage 9 (Exception Router) — Sardine, Bretton AI, Parcha all explicitly target this with "audit-ready narrative" outputs. JPM is doing this internally. This is the second-highest ROI deployment after stage 3.
