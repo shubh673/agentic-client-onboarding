@@ -1,9 +1,36 @@
 import axios from "axios";
 
+const TOKEN_KEY = "onboarding.access_token";
+
 export const api = axios.create({
   baseURL: "/api",
   headers: { Accept: "application/json" },
 });
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (resp) => resp,
+  (error) => {
+    if (error?.response?.status === 401) {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem("onboarding.id_token");
+      localStorage.removeItem("onboarding.refresh_token");
+      // Avoid redirect loops on /auth/* endpoints themselves.
+      const url: string = error?.config?.url ?? "";
+      if (!url.startsWith("/auth/")) {
+        window.location.assign("/login");
+      }
+    }
+    return Promise.reject(error);
+  },
+);
 
 export type ApplicationDocument = {
   id: string;
@@ -86,7 +113,9 @@ export function openApplicationSocket(
   onEvent: (event: ApplicationEvent) => void,
 ): WebSocket {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const url = `${protocol}//${window.location.host}/api/applications/${id}/events`;
+  const token = localStorage.getItem(TOKEN_KEY);
+  const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+  const url = `${protocol}//${window.location.host}/api/applications/${id}/events${qs}`;
   const ws = new WebSocket(url);
   ws.onmessage = (e) => {
     try {

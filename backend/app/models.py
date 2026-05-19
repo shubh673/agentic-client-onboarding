@@ -19,6 +19,9 @@ class Application(Base):
     address: Mapped[str] = mapped_column(Text, nullable=False)
     pan_number: Mapped[str] = mapped_column(String(10), nullable=False)
     aadhaar_number: Mapped[str] = mapped_column(String(12), nullable=False)
+    customer_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     current_stage: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="in_progress")
     verification_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -48,6 +51,17 @@ class ApplicationDocument(Base):
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     application: Mapped[Application] = relationship(back_populates="documents")
+
+
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    application_number: Mapped[str] = mapped_column(String(20), nullable=False, unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    cognito_sub: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ApplicationLog(Base):

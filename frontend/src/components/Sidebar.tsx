@@ -1,12 +1,13 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
   FilePlus2,
   ListChecks,
   ShieldCheck,
-  ChevronDown,
   ClipboardCheck,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth";
 
 const NAV = [
   { to: "/", label: "My applications", icon: ListChecks, enabled: true },
@@ -14,7 +15,24 @@ const NAV = [
   { to: "/manual-review", label: "Manual review", icon: ClipboardCheck, enabled: true },
 ];
 
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]!.toUpperCase())
+    .join("");
+}
+
 export function Sidebar() {
+  const { customer, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login", { replace: true });
+  };
+
   return (
     <aside className="flex h-screen w-[260px] shrink-0 flex-col border-r bg-background">
       <div className="px-5 pt-6 pb-4">
@@ -58,16 +76,28 @@ export function Sidebar() {
       </div>
 
       <div className="border-t p-3">
-        <button className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-accent">
+        <div className="flex w-full items-center gap-3 rounded-lg px-2 py-2">
           <div className="flex size-8 items-center justify-center rounded-full bg-secondary text-xs font-semibold text-secondary-foreground">
-            DU
+            {customer ? initials(customer.name) : "?"}
           </div>
-          <div className="flex-1 text-sm leading-tight">
-            <p className="font-medium text-foreground">Demo User</p>
-            <p className="text-xs text-muted-foreground">Customer</p>
+          <div className="min-w-0 flex-1 text-sm leading-tight">
+            <p className="truncate font-medium text-foreground">
+              {customer?.name ?? "Loading…"}
+            </p>
+            <p className="truncate font-mono text-[11px] text-muted-foreground">
+              {customer?.application_number ?? ""}
+            </p>
           </div>
-          <ChevronDown className="size-4 text-muted-foreground" />
-        </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="Log out"
+            aria-label="Log out"
+          >
+            <LogOut className="size-4" />
+          </button>
+        </div>
       </div>
     </aside>
   );

@@ -60,6 +60,39 @@ class ApplicationResponse(BaseModel):
     documents: list[DocumentResponse] = []
 
 
+class SignupRequest(BaseModel):
+    email: EmailStr
+    name: str = Field(min_length=1, max_length=255)
+    phone_number: str = Field(pattern=r"^\+[1-9][0-9]{7,14}$", description="E.164 format, e.g. +919876543210")
+
+
+class SignupResponse(BaseModel):
+    application_number: str
+    email: EmailStr
+    message: str = "Your password has been emailed to you."
+
+
+class LoginRequest(BaseModel):
+    username: EmailStr
+    password: str = Field(min_length=1)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    id_token: str
+    refresh_token: str | None = None
+    expires_in: int
+    token_type: str = "Bearer"
+
+
+class CustomerMe(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    application_number: str
+    email: EmailStr
+    name: str
+
+
 class LogEntryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

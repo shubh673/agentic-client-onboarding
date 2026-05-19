@@ -20,10 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.database import SessionLocal, get_db
-from app.models import Application, ApplicationDocument, ApplicationLog
+from app.models import Application, ApplicationDocument, ApplicationLog, Customer
 from app.schemas import ApplicationCreate, ApplicationResponse, LogEntryResponse
 from app.utils.aws import presigned_get
 from app.utils.files import upload_to_s3
+from app.utils.jwt_auth import current_customer, verify_token
 from app.utils.stage_runner import (
     emit_initial_logs,
     rerun_from_stage_2,
@@ -48,6 +49,7 @@ async def create_application(
     pan_file: UploadFile = File(...),
     aadhaar_file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    customer: Customer = Depends(current_customer),
 ) -> ApplicationResponse:
     try:
         payload = ApplicationCreate(
@@ -70,6 +72,7 @@ async def create_application(
         address=payload.address,
         pan_number=payload.pan_number,
         aadhaar_number=payload.aadhaar_number,
+        customer_id=customer.id,
         current_stage=2,  # advance — Step 1 complete
         status="stage_1_complete",
     )
@@ -120,6 +123,7 @@ async def reupload_documents(
     pan_file: UploadFile | None = File(None),
     aadhaar_file: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
+    customer: Customer = Depends(current_customer),
 ) -> ApplicationResponse:
     if pan_file is None and aadhaar_file is None:
         raise HTTPException(
@@ -131,6 +135,8 @@ async def reupload_documents(
     application = result.scalar_one_or_none()
     if application is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
+    if application.customer_id != customer.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your application")
     if application.status != "stage_2_failed":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -192,26 +198,45 @@ async def reupload_documents(
 
 @router.websocket("/{application_id}/events")
 async def application_events(websocket: WebSocket, application_id: uuid.UUID) -> None:
-    app_id = str(application_id)
-    await ws_manager.connect(app_id, websocket)
+    # Browsers can't set custom headers on `new WebSocket(...)`, so the access
+    # token is passed as a query parameter. Validate before accepting.
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4401)
+        return
+    try:
+        claims = verify_token(token)
+    except HTTPException:
+        await websocket.close(code=4401)
+        return
+    sub = claims.get("sub")
 
-    # Send an initial snapshot so a freshly connected client doesn't have to wait
-    # for the next state change to render.
+    app_id = str(application_id)
+
     async with SessionLocal() as db:
+        cust_result = await db.execute(select(Customer).where(Customer.cognito_sub == sub))
+        customer = cust_result.scalar_one_or_none()
+        if customer is None:
+            await websocket.close(code=4401)
+            return
+
         result = await db.execute(select(Application).where(Application.id == application_id))
         application = result.scalar_one_or_none()
-        if application is not None:
-            await db.refresh(application, ["documents"])
-            payload = ApplicationResponse.model_validate(application).model_dump(mode="json")
-            try:
-                await websocket.send_json({"type": "application_update", "application": payload})
-            except Exception:
-                pass
+        if application is None or application.customer_id != customer.id:
+            await websocket.close(code=4403)
+            return
+        await db.refresh(application, ["documents"])
+        snapshot = ApplicationResponse.model_validate(application).model_dump(mode="json")
+
+    await ws_manager.connect(app_id, websocket)
+
+    try:
+        await websocket.send_json({"type": "application_update", "application": snapshot})
+    except Exception:
+        pass
 
     try:
         while True:
-            # We don't expect inbound traffic from the client; just keep the
-            # connection open and discard anything received.
             await websocket.receive_text()
     except WebSocketDisconnect:
         pass
@@ -220,24 +245,46 @@ async def application_events(websocket: WebSocket, application_id: uuid.UUID) ->
 
 
 @router.get("", response_model=list[ApplicationResponse])
-async def list_applications(db: AsyncSession = Depends(get_db)) -> list[ApplicationResponse]:
-    result = await db.execute(select(Application).order_by(Application.created_at.desc()))
+async def list_applications(
+    db: AsyncSession = Depends(get_db),
+    customer: Customer = Depends(current_customer),
+) -> list[ApplicationResponse]:
+    result = await db.execute(
+        select(Application)
+        .where(Application.customer_id == customer.id)
+        .order_by(Application.created_at.desc())
+    )
     return [ApplicationResponse.model_validate(a) for a in result.scalars().all()]
 
 
 @router.get("/{application_id}", response_model=ApplicationResponse)
-async def get_application(application_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> ApplicationResponse:
+async def get_application(
+    application_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    customer: Customer = Depends(current_customer),
+) -> ApplicationResponse:
     result = await db.execute(select(Application).where(Application.id == application_id))
     application = result.scalar_one_or_none()
     if application is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
+    if application.customer_id != customer.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your application")
     return ApplicationResponse.model_validate(application)
 
 
 @router.get("/{application_id}/logs", response_model=list[LogEntryResponse])
 async def list_application_logs(
-    application_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    application_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    customer: Customer = Depends(current_customer),
 ) -> list[LogEntryResponse]:
+    app_result = await db.execute(select(Application).where(Application.id == application_id))
+    application = app_result.scalar_one_or_none()
+    if application is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
+    if application.customer_id != customer.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your application")
+
     result = await db.execute(
         select(ApplicationLog)
         .where(ApplicationLog.application_id == application_id)
@@ -251,9 +298,17 @@ async def get_document(
     application_id: uuid.UUID,
     doc_type: str,
     db: AsyncSession = Depends(get_db),
+    customer: Customer = Depends(current_customer),
 ) -> RedirectResponse:
     if doc_type not in {"pan", "aadhaar"}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "doc_type must be 'pan' or 'aadhaar'")
+
+    app_result = await db.execute(select(Application).where(Application.id == application_id))
+    application = app_result.scalar_one_or_none()
+    if application is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Application not found")
+    if application.customer_id != customer.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your application")
 
     result = await db.execute(
         select(ApplicationDocument).where(

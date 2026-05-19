@@ -1,5 +1,10 @@
 {
   "enabledMcpjsonServers": [
     "postgres"
-  ]
+  ],
+  "permissions": {
+    "allow": [
+      "mcp__postgres__execute_sql"
+    ]
+  }
 }
