@@ -19,6 +19,7 @@ from app.schemas import (
 from app.utils.cognito import (
     admin_create_user,
     admin_delete_user,
+    admin_get_phone_number,
     admin_initiate_auth,
     admin_set_user_password_permanent,
 )
@@ -74,6 +75,7 @@ async def signup(payload: SignupRequest, db: AsyncSession = Depends(get_db)) -> 
         application_number=application_number,
         email=payload.email,
         name=payload.name,
+        phone_number=payload.phone_number,
         cognito_sub=cognito_sub,
     )
     db.add(customer)
@@ -113,5 +115,15 @@ async def login(payload: LoginRequest) -> TokenResponse:
 
 
 @router.get("/me", response_model=CustomerMe)
-async def me(customer: Customer = Depends(current_customer)) -> CustomerMe:
+async def me(
+    customer: Customer = Depends(current_customer),
+    db: AsyncSession = Depends(get_db),
+) -> CustomerMe:
+    # Backfill phone_number from Cognito for accounts created before the column existed.
+    if not customer.phone_number:
+        phone = await asyncio.to_thread(admin_get_phone_number, customer.email)
+        if phone:
+            customer.phone_number = phone
+            await db.commit()
+            await db.refresh(customer)
     return CustomerMe.model_validate(customer)

@@ -19,6 +19,7 @@ import { StepCard } from "@/components/StepCard";
 import { ApplicationForm } from "@/components/ApplicationForm";
 import { Badge } from "@/components/ui/badge";
 import type { Application } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 type Status = "active" | "complete" | "locked";
 
@@ -67,6 +68,7 @@ const STAGES = [
 
 export function NewApplication() {
   const navigate = useNavigate();
+  const { customer } = useAuth();
   const [submitted, setSubmitted] = useState<Application | null>(null);
 
   const handleSubmitted = (app: Application) => {
@@ -75,7 +77,7 @@ export function NewApplication() {
   };
 
   const currentStage = submitted ? submitted.current_stage : 1;
-  const customerName = submitted?.full_name ?? "New customer";
+  const customerName = submitted?.full_name ?? customer?.name ?? "New customer";
 
   const statusFor = (idx1: number): Status => {
     if (idx1 < currentStage) return "complete";
@@ -148,7 +150,14 @@ export function NewApplication() {
               }
             >
               {isStep1 && status === "active" && (
-                <ApplicationForm onSubmitted={handleSubmitted} />
+                <ApplicationForm
+                  onSubmitted={handleSubmitted}
+                  defaults={{
+                    full_name: customer?.name,
+                    email: customer?.email,
+                    mobile: customer?.phone_number ?? undefined,
+                  }}
+                />
               )}
               {isStep1 && status === "complete" && submitted && (
                 <SubmittedSummary app={submitted} />

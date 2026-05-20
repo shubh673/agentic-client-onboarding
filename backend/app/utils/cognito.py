@@ -89,6 +89,23 @@ def admin_set_user_password_permanent(email: str, password: str) -> None:
     )
 
 
+def admin_get_phone_number(username: str) -> str | None:
+    """Read the phone_number attribute from Cognito. Returns None if the
+    attribute is missing or the user can't be fetched."""
+    s = get_settings()
+    try:
+        resp = cognito_client().admin_get_user(
+            UserPoolId=s.COGNITO_USER_POOL_ID,
+            Username=username,
+        )
+    except Exception:
+        return None
+    for attr in resp.get("UserAttributes", []):
+        if attr.get("Name") == "phone_number":
+            return attr.get("Value")
+    return None
+
+
 def admin_delete_user(username: str) -> None:
     s = get_settings()
     cognito_client().admin_delete_user(

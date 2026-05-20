@@ -9,6 +9,7 @@ type Customer = {
   application_number: string;
   email: string;
   name: string;
+  phone_number: string | null;
 };
 
 type AuthContextValue = {

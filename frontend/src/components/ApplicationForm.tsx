@@ -32,8 +32,10 @@ const TOTAL_FIELDS = 9; // 7 text + 2 files
 
 export function ApplicationForm({
   onSubmitted,
+  defaults,
 }: {
   onSubmitted: (app: Application) => void;
+  defaults?: { full_name?: string; email?: string; mobile?: string };
 }) {
   const [panFile, setPanFile] = useState<File | null>(null);
   const [aadhaarFile, setAadhaarFile] = useState<File | null>(null);
@@ -45,7 +47,15 @@ export function ApplicationForm({
     handleSubmit,
     watch,
     formState: { errors },
-  } = useForm<FormValues>({ resolver: zodResolver(schema), mode: "onBlur" });
+  } = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    mode: "onBlur",
+    defaultValues: {
+      full_name: defaults?.full_name ?? "",
+      email: defaults?.email ?? "",
+      mobile: defaults?.mobile ?? "",
+    },
+  });
 
   const watched = watch();
   const filledCount = useMemo(() => {

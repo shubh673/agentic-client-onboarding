@@ -91,6 +91,7 @@ class CustomerMe(BaseModel):
     application_number: str
     email: EmailStr
     name: str
+    phone_number: str | None = None
 
 
 class LogEntryResponse(BaseModel):
