@@ -6,6 +6,7 @@ import { MyApplications } from "@/pages/MyApplications";
 import { NewApplication } from "@/pages/NewApplication";
 import { ApplicationDetail } from "@/pages/ApplicationDetail";
 import { ManualReview } from "@/pages/ManualReview";
+import { Chatbot } from "@/pages/Chatbot";
 import { Login } from "@/pages/Login";
 import { Signup } from "@/pages/Signup";
 
@@ -55,6 +56,14 @@ export default function App() {
           element={
             <ProtectedLayout>
               <ManualReview />
+            </ProtectedLayout>
+          }
+        />
+        <Route
+          path="/chatbot"
+          element={
+            <ProtectedLayout>
+              <Chatbot />
             </ProtectedLayout>
           }
         />

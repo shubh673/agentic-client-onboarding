@@ -24,11 +24,10 @@ from app.models import Application, ApplicationDocument, ApplicationLog, Custome
 from app.schemas import ApplicationCreate, ApplicationResponse, LogEntryResponse
 from app.utils.aws import presigned_get
 from app.utils.files import upload_to_s3
+from app.utils.intake import submit_application
 from app.utils.jwt_auth import current_customer, verify_token
 from app.utils.stage_runner import (
-    emit_initial_logs,
     rerun_from_stage_2,
-    run_stages,
     schedule,
 )
 from app.utils.ws_manager import manager as ws_manager
@@ -64,56 +63,19 @@ async def create_application(
     except ValidationError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, e.errors()) from e
 
-    application = Application(
-        full_name=payload.full_name,
-        dob=payload.dob,
-        mobile=payload.mobile,
-        email=payload.email,
-        address=payload.address,
-        pan_number=payload.pan_number,
-        aadhaar_number=payload.aadhaar_number,
-        customer_id=customer.id,
-        current_stage=2,  # advance — Step 1 complete
-        status="stage_1_complete",
+    pan_data = await pan_file.read()
+    aadhaar_data = await aadhaar_file.read()
+
+    application = await submit_application(
+        db,
+        customer,
+        payload,
+        pan_data,
+        pan_file.filename or "pan",
+        aadhaar_data,
+        aadhaar_file.filename or "aadhaar",
+        settings.MAX_UPLOAD_BYTES,
     )
-    db.add(application)
-    await db.flush()  # populate application.id without committing
-
-    try:
-        for doc_type, upload in (("pan", pan_file), ("aadhaar", aadhaar_file)):
-            s3_key, mime, size = await upload_to_s3(
-                upload, application.id, doc_type, settings.MAX_UPLOAD_BYTES
-            )
-            db.add(
-                ApplicationDocument(
-                    application_id=application.id,
-                    doc_type=doc_type,
-                    original_filename=upload.filename or f"{doc_type}",
-                    s3_key=s3_key,
-                    mime_type=mime,
-                    size_bytes=size,
-                )
-            )
-    except HTTPException:
-        await db.rollback()
-        raise
-    except Exception as e:
-        await db.rollback()
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, f"Failed to save uploads: {e}"
-        ) from e
-
-    await db.commit()
-    await db.refresh(application, ["documents"])
-
-    # Persist Stage 1 logs before responding so the detail page that the client
-    # is about to navigate to lands on a non-empty log list.
-    await emit_initial_logs(application.id)
-
-    # Kick off the agent simulation in the background. Each stage transition is
-    # persisted and broadcast over WebSocket to anyone watching this application.
-    schedule(run_stages(application.id))
-
     return ApplicationResponse.model_validate(application)
 
 

@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
+  Bot,
   FilePlus2,
   ListChecks,
   ShieldCheck,
@@ -13,6 +14,7 @@ const NAV = [
   { to: "/", label: "My applications", icon: ListChecks, enabled: true },
   { to: "/new", label: "New application", icon: FilePlus2, enabled: true },
   { to: "/manual-review", label: "Manual review", icon: ClipboardCheck, enabled: true },
+  { to: "/chatbot", label: "Chatbot", icon: Bot, enabled: true },
 ];
 
 function initials(name: string): string {
