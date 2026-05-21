@@ -6,4 +6,4 @@ Stage 5 (Pricing) — Still mostly rule-based across the industry. Agents here a
 Stage 6 (Disclosure) — Almost nobody is doing this well with agents yet. Norm AI's reg-grounding could fit. This is a genuine whitespace if you're building.
 Stage 7 (Account Creation) — Deterministic everywhere. Agents orchestrate around it (Casca, JPM internal tooling) but don't write to core banking directly. Don't change this.
 Stage 8 (Welcome/Activation) — RevRag, Lorikeet, Fini, plus Casca for SMB. This is where neobanks lose customers and where agent ROI is rapidly being proven.
-Stage 9 (Exception Router) — Sardine, Bretton AI, Parcha all explicitly target this with "audit-ready narrative" outputs. JPM is doing this internally. This is the second-highest ROI deployment after stage 3.
+Stage 9 (Exception Router) — Sardine, Bretton AI, Parcha all explicitly target this with "audit-ready narrative" outputs. JPM is doing this internally. This is the second-highest ROI deployment after stage 3...
