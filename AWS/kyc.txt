@@ -1,0 +1,26 @@
+DEdup Agent 
+Layer 1 — Exact match on identifiers. Check if PAN, Aadhaar, phone, or email already exists. This is a hash lookup, runs in 1-2ms regardless of database size. About 95% of legitimate duplicates are caught here. If you find a hit, you stop — no need for the other layers.
+Layer 2 — Fuzzy match on names + DOB. This is for the cases where someone applies again with slightly different information (typo, married name, English vs vernacular spelling). You filter by DOB first, then compute name similarity on the small remaining set. Runs in 20-30ms.
+Layer 3 — Cross-field anomaly check. This is the fraud-detection layer. It runs queries like "is this phone already used by someone with a different PAN?" These don't find duplicates — they find suspicious patterns. Runs in 10ms.
+
+KYC Risk Scoring Agent
+Step 1 — Sanctions + PEP in one API call() OpenSanctions api 30 days free tier 
+Step 2 — Adverse media via LLM
+    Take the customer's name + DOB year + city/state
+    Send to Claude/GPT with web search enabled
+    Ask: "Search for negative news, criminal allegations, fraud cases, or regulatory actions about a person matching these attributes. Return findings in this structured format..."
+    LLM searches the web, reads results, returns structured findings
+
+Simple decision logic:
+Evidence found                       What to do
+Nothing                              CLEAR — proceed with onboarding
+Sanctions hit, high confidence       HARD REJECT — block, file SAR
+Sanctions hit, low confidence        MANUAL REVIEW
+PEP confirmedEDD —                   proceed but need enhanced due diligence + senior approval
+Adverse media, serious + recent      MANUAL REVIEW
+Adverse media, minor or old          CLEAR with flag — log and proceed
+
+Audit agent
+Evidence assembly — the audit pack for compliance
+
+ 

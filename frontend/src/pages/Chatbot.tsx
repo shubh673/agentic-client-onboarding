@@ -47,6 +47,7 @@ export function Chatbot() {
   const [error, setError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const startedRef = useRef(false);
   const navigate = useNavigate();
 
@@ -62,6 +63,13 @@ export function Chatbot() {
       behavior: "smooth",
     });
   }, [messages]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [input]);
 
   const renderResponse = (resp: ChatbotResponse) => {
     setLatest(resp);
@@ -147,7 +155,7 @@ export function Chatbot() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -287,27 +295,28 @@ export function Chatbot() {
           )}
           <div
             className={cn(
-              "flex items-center gap-2 rounded-full border bg-background pl-4 pr-1.5 py-1.5 shadow-sm",
+              "flex items-end gap-2 rounded-3xl border bg-background pl-4 pr-1.5 py-1.5 shadow-sm",
               !inputDisabled && "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1",
               inputDisabled && "opacity-60",
             )}
           >
-            <Search className="size-4 shrink-0 text-muted-foreground" />
-            <input
-              type="text"
+            <Search className="mb-2 size-4 shrink-0 text-muted-foreground" />
+            <textarea
+              ref={textareaRef}
+              rows={1}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={inputDisabled}
               placeholder={placeholder}
-              className="flex-1 bg-transparent py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed"
+              className="flex-1 resize-none overflow-y-auto bg-transparent py-1.5 text-sm leading-6 placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed"
             />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               aria-label="Attach file"
               disabled={!expectingFile || busy}
-              className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
             >
               <Paperclip className="size-4" />
             </button>
@@ -317,7 +326,7 @@ export function Chatbot() {
               disabled={inputDisabled || !input.trim()}
               aria-label="Send message"
               className={cn(
-                "flex size-9 items-center justify-center rounded-full text-white transition-colors",
+                "flex size-9 shrink-0 items-center justify-center rounded-full text-white transition-colors",
                 !inputDisabled && input.trim()
                   ? "bg-orange-500 hover:bg-orange-600"
                   : "bg-orange-300 cursor-not-allowed",

@@ -185,7 +185,13 @@ def summarize(state: State) -> dict:
     errors = _field_errors(state)
 
     lines: list[str] = []
-    if missing:
+    if not have:
+        lines.append(
+            "I didn't catch any KYC details in that. Could you share your "
+            "full name, date of birth (dd-mm-yyyy), mobile, email, address, "
+            "PAN number, and Aadhaar number?"
+        )
+    elif missing:
         lines.append("Thanks! Here's what I have so far:")
         lines += [f"{label}: {value}" for label, value in have]
         lines.append("")
