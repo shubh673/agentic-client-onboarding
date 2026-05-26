@@ -11,7 +11,7 @@ Decision flow (kept in sync with `build_kyc_graph` in `kyc.py`):
   L1 hit       -> terminate_reject          (status=rejected,       reason=duplicate_identifier)
   L2 hit       -> terminate_manual_review   (status=manual_review,  reason=possible_duplicate_fuzzy)
   L3 hit       -> terminate_manual_review   (status=manual_review,  reason=cross_field_anomaly)
-  all clear    -> risk_screening -> adverse_media_scan -> aggregate (status driven by screening)
+  all clear    -> compliance_screening -> adverse_media_scan -> aggregate (status driven by screening)
 """
 from __future__ import annotations
 
@@ -34,6 +34,8 @@ from app.agents.tools.dedup_tools import (
     find_fuzzy_candidates,
 )
 from app.agents.tools.kyc_tools import run_kyc_check
+from app.agents.tools.opensanctions import screen_person
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +79,7 @@ def _coerce_app_id(value: Any) -> uuid.UUID | None:
 
 async def dedup_l1_exact(state: dict, config: RunnableConfig) -> dict:
     db = _cfg(config, "db_session")
-    await _emit(config, "info", "Dedup L1: exact-match identifier scan (PAN / Aadhaar / mobile / email)")
+    await _emit(config, "info", "Dedup L1: exact-match identifier scan (PAN / Aadhaar)")
 
     if db is None:
         await _emit(config, "warning", "Dedup L1 skipped: no DB session available")
@@ -88,8 +90,6 @@ async def dedup_l1_exact(state: dict, config: RunnableConfig) -> dict:
         application_id=_coerce_app_id(state.get("application_id")),
         pan_number=state.get("pan_number", ""),
         aadhaar_number=state.get("aadhaar_number", ""),
-        email=state.get("email", ""),
-        mobile=state.get("mobile", ""),
     )
 
     if not matches:
@@ -240,50 +240,76 @@ def dedup_route(state: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Risk screening — scaffolded today, wraps existing dummy run_kyc_check.
-# Real OpenSanctions + LLM-driven adverse-media calls land here later.
+# Compliance screening — sanctions + PEP in a single OpenSanctions call.
+# Falls back to the dummy run_kyc_check stub only when no API key is set so
+# local dev / demos still flow through to later stages.
 # ---------------------------------------------------------------------------
 
-async def risk_screening(state: dict, config: RunnableConfig) -> dict:
-    await _emit(config, "info", "Risk screening: sanctions + PEP")
-
-    # TODO(risk-scoring): replace with OpenSanctions API call.
-    try:
-        response = await asyncio.to_thread(
-            run_kyc_check,
-            state.get("full_name", ""),
-            state.get("pan_number", ""),
-            state.get("aadhaar_number", ""),
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Risk screening provider call failed")
-        await _emit(config, "error", f"Risk screening failed: {exc}")
-        return {
-            "sanctions_status": "error",
-            "pep_status": "error",
-            "reference_id": "",
-            "risk_decision": "manual_review",
-        }
-
-    sanctions = response.get("sanctions", "unknown")
-    pep = response.get("pep", "unknown")
-    await _emit(
-        config,
-        "success" if sanctions == "clear" else "error",
-        f"Sanctions screening: {sanctions}",
+async def _stub_screening(config: RunnableConfig, state: dict) -> dict:
+    """Dev fallback when OPENSANCTIONS_API_KEY is unset — keeps the demo flowing."""
+    await _emit(config, "warning", "Compliance screening: stub mode (no API key configured)")
+    response = await asyncio.to_thread(
+        run_kyc_check,
+        state.get("full_name", ""),
+        state.get("pan_number", ""),
+        state.get("aadhaar_number", ""),
     )
-    await _emit(
-        config,
-        "success" if pep == "clear" else "error",
-        f"PEP screening: {pep}",
-    )
-
+    sanctions = response.get("sanctions", "clear")
+    pep = response.get("pep", "clear")
+    await _emit(config, "success" if sanctions == "clear" else "error", f"Sanctions screening: {sanctions}")
+    await _emit(config, "success" if pep == "clear" else "error", f"PEP screening: {pep}")
     return {
         "sanctions_status": sanctions,
         "pep_status": pep,
         "reference_id": response.get("reference_id", ""),
-        "adverse_media_findings": response.get("adverse_media", "unknown"),
+        "compliance_matches": [],
         "risk_decision": "clear" if response.get("status") == "approved" else "manual_review",
+    }
+
+
+async def compliance_screening(state: dict, config: RunnableConfig) -> dict:
+    """Screen the applicant against sanctions + PEP via one OpenSanctions call."""
+    await _emit(config, "info", "Compliance screening: sanctions + PEP (OpenSanctions)")
+
+    if not get_settings().OPENSANCTIONS_API_KEY:
+        return await _stub_screening(config, state)
+
+    result = await screen_person(
+        full_name=state.get("full_name", ""),
+        dob=state.get("dob", ""),
+    )
+
+    if result.error:
+        # Fail safe: never auto-approve when screening could not run.
+        await _emit(config, "error", f"Compliance screening unavailable ({result.error}) — routing to manual review")
+        return {
+            "sanctions_status": "error",
+            "pep_status": "error",
+            "reference_id": result.reference_id,
+            "compliance_matches": [],
+            "risk_decision": "manual_review",
+        }
+
+    # Surface each matched entity for the audit trail.
+    for m in result.matches:
+        datasets = ", ".join(m.datasets[:3]) if m.datasets else "—"
+        await _emit(
+            config,
+            "error",
+            f"Screening match: {m.caption} ({datasets}; topics {', '.join(m.topics) or '—'}; score {m.score:.2f})",
+        )
+
+    sanctions = "hit" if result.sanctions_hit else "clear"
+    pep = "hit" if result.pep_hit else "clear"
+    await _emit(config, "success" if sanctions == "clear" else "error", f"Sanctions screening: {sanctions}")
+    await _emit(config, "success" if pep == "clear" else "error", f"PEP screening: {pep}")
+
+    return {
+        "sanctions_status": sanctions,
+        "pep_status": pep,
+        "reference_id": result.reference_id,
+        "compliance_matches": [m.to_dict() for m in result.matches],
+        "risk_decision": "clear" if result.clear else "manual_review",
     }
 
 
@@ -294,12 +320,12 @@ async def adverse_media_scan(state: dict, config: RunnableConfig) -> dict:
     log trail is unchanged. Future: structured LLM call with web search
     enabled over (name + DOB year + city/state).
     """
-    finding = state.get("adverse_media_findings", "unknown")
+    finding = state.get("adverse_media_findings", "not_screened")
     await _emit(config, "info", "Adverse media scan")
-    # TODO(risk-scoring): replace with structured LLM + web search call.
+    # TODO(adverse-media): replace with structured LLM + web search call.
     await _emit(
         config,
-        "success" if finding == "no_hits" else "error",
+        "error" if finding == "hits" else "info",
         f"Adverse media: {finding}",
     )
     return {"adverse_media_findings": finding}
@@ -367,13 +393,20 @@ async def aggregate(state: dict, config: RunnableConfig) -> dict:
             "final_reason": "clear",
         }
 
+    if state.get("sanctions_status") == "hit":
+        reason = "sanctions_hit"
+    elif state.get("pep_status") == "hit":
+        reason = "pep_hit"
+    else:
+        reason = "compliance_manual_review"
+
     await _emit(
         config,
         "warning",
-        f"KYC flagged for manual review by risk screening (reference {reference_id})",
+        f"KYC flagged for manual review by compliance screening: {reason} (reference {reference_id})",
     )
     return {
         "approved": False,
         "manual_review": True,
-        "final_reason": "risk_screening_manual_review",
+        "final_reason": reason,
     }

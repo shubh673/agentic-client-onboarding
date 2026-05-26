@@ -4,9 +4,9 @@ Runs an applicant through the complete KYC LangGraph and prints the live log
 trail (the "KYC agent invoked / Dedup L1 / L2 / L3 / compliance" lines) plus the
 final decision.
 
-    cd backend
-    env\\Scripts\\python.exe test_kyc_agent.py            # runs TEST_CASES below
-    env\\Scripts\\python.exe test_kyc_agent.py -i         # type one applicant at the prompt
+Runnable from anywhere (it locates the backend dir automatically), e.g.:
+    ..\\env\\Scripts\\python.exe test_kyc_agent.py            # runs TEST_CASES below
+    ..\\env\\Scripts\\python.exe test_kyc_agent.py -i         # type one applicant at the prompt
 
 To test your own inputs, edit the TEST_CASES list below and re-run.
 
@@ -22,9 +22,24 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
+from pathlib import Path
 
-from app.agents.kyc import KYCAgent, KYCResult
+
+def _find_backend_dir(start: Path) -> Path:
+    """Walk upward to the backend dir (the one holding app/config.py)."""
+    for d in (start, *start.parents):
+        if (d / "app" / "config.py").exists():
+            return d
+    return start
+
+
+# Make this runnable from anywhere (backend/, backend/test/, …): put the backend
+# dir on sys.path so `app` imports, and chdir there so pydantic-settings finds .env.
+_BACKEND_DIR = _find_backend_dir(Path(__file__).resolve().parent)
+sys.path.insert(0, str(_BACKEND_DIR))
+os.chdir(_BACKEND_DIR)
 
 # Windows consoles default to cp1252; force UTF-8 so em-dashes, accented names
 # and ₹ in agent messages / entity captions print correctly.
@@ -33,27 +48,68 @@ try:
 except (AttributeError, ValueError):
     pass
 
+from app.agents.kyc import KYCAgent, KYCResult  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # EDIT ME — add / change the applicants you want to run through KYC.
 # Fields: full_name, pan_number, aadhaar_number, email, mobile, dob (ISO),
 #         application_id (optional — leave out / None for a brand-new applicant).
+#
+# These four cases are built against the existing DB record (status=completed):
+#   Hisham Islah | DOB 2003-11-01 | PAN ABCDE1234G | Aadhaar 123456789124
+#                | mobile +918078808923 | hisham.islah@arttechgroup.com
+# so dedup has something to collide with. Expect, in order: L1 reject,
+# L2 manual review, L3 manual review, then a fully-clear approval.
 # ---------------------------------------------------------------------------
 TEST_CASES: list[dict[str, str]] = [
+    # CASE 1 — L1 CATCH (exact identifier duplicate).
+    # Reuses Hisham's real PAN / Aadhaar / email / mobile -> Layer 1 fires.
+    # Expect: REJECTED (duplicate_identifier); L2/L3/compliance never run.
     {
-        "full_name": "Aarav Sharma",
-        "pan_number": "ABCDE1234F",
-        "aadhaar_number": "123412341234",
-        "email": "aarav.sharma@example.com",
-        "mobile": "9876543210",
-        "dob": "1990-01-15",
+        "full_name": "Hisham Islah",
+        "pan_number": "ABCDE1234G",
+        "aadhaar_number": "123456789124",
+        "email": "hisham.islah@arttechgroup.com",
+        "mobile": "+918078808923",
+        "dob": "2003-11-01",
     },
+    # CASE 2 — L1 PASSES, L2 FLAGS (fuzzy name + same DOB).
+    # All four identifiers are NEW (so Layer 1, which only compares identifiers,
+    # finds nothing) but the name matches "Hisham Islah" and the DOB is the same
+    # 2003-11-01 -> Layer 2 scores it a duplicate.
+    # Expect: MANUAL REVIEW (possible_duplicate_fuzzy); L3/compliance never run.
+    # Tip: tweak the spelling (e.g. "Hisham Islaah") to exercise fuzzy tolerance.
     {
-        "full_name": "Vladimir Putin",
-        "pan_number": "ZZZZZ9999Z",
-        "aadhaar_number": "999999999999",
-        "email": "vp@example.com",
-        "mobile": "9000000000",
-        "dob": "1952-10-07",
+        "full_name": "Hisham Isla",
+        "pan_number": "PQRSX6789L",
+        "aadhaar_number": "987654321098",
+        "email": "hisham.alt@example.com",
+        "mobile": "+919999900000",
+        "dob": "2003-11-01",
+    },
+    # CASE 3 — L1 & L2 PASS, L3 FLAGS (cross-field anomaly / fraud signal).
+    # Reuses Hisham's MOBILE (+918078808923) but with a DIFFERENT PAN, Aadhaar,
+    # name and DOB. L1 (PAN/Aadhaar only) finds nothing; L2 finds nothing
+    # (different name + DOB); L3 spots the mobile reused with a different PAN.
+    # Expect: MANUAL REVIEW (cross_field_anomaly).
+    {
+        "full_name": "Shubham Singh",
+        "pan_number": "ABCDE9999Z",
+        "aadhaar_number": "555566667777",
+        "email": "shubham.singh@example.com",
+        "mobile": "+918078808923",
+        "dob": "1995-05-05",
+    },
+    # CASE 4 — ALL THREE CLEAR (fresh applicant) -> compliance -> approval.
+    # Different name, different DOB, all-new identifiers: L1/L2/L3 clear, the
+    # OpenSanctions check is clean. Expect: APPROVED.
+    {
+        "full_name": "Shubham Singh",
+        "pan_number": "LMNOP4567Q",
+        "aadhaar_number": "111122223333",
+        "email": "shubham.singh@example.com",
+        "mobile": "+919812345678",
+        "dob": "1992-06-20",
     },
 ]
 

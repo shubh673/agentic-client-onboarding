@@ -148,6 +148,12 @@ const KYC_REASON_LABELS: Record<string, string> = {
     "Cross-field anomaly — one of the supplied identifiers has been previously paired with a different PAN/Aadhaar.",
   risk_screening_manual_review:
     "Risk screening (sanctions / PEP / adverse media) returned a signal that requires human review.",
+  sanctions_hit:
+    "Sanctions match — the applicant's name and date of birth match a sanctioned entity. Compliance must confirm before proceeding.",
+  pep_hit:
+    "Politically Exposed Person — the applicant matches a PEP record and requires enhanced due diligence.",
+  compliance_manual_review:
+    "Compliance screening could not be completed automatically and needs a manual review.",
   manual_review_required: "Flagged for manual review by compliance.",
   kyc_rejected: "KYC screening rejected the application.",
   kyc_agent_error:

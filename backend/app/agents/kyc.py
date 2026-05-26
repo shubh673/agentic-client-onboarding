@@ -12,7 +12,7 @@ Three layers run in sequence, short-circuiting on hit:
       |-> dedup_l3_anomaly    (cross-field reuse with a different PAN, etc.)
       |     hit  -> terminate_manual_review   -> END
       |     clear ->
-      |-> risk_screening      (today: dummy run_kyc_check; later: OpenSanctions)
+      |-> compliance_screening (OpenSanctions sanctions + PEP; hit -> manual review)
       |-> adverse_media_scan  (today: passthrough; later: LLM + web search)
       |-> aggregate           -> END
 
@@ -50,11 +50,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.kyc_nodes import (
     adverse_media_scan,
     aggregate,
+    compliance_screening,
     dedup_l1_exact,
     dedup_l2_fuzzy,
     dedup_l3_anomaly,
     dedup_route,
-    risk_screening,
     terminate_manual_review,
     terminate_reject,
 )
@@ -80,9 +80,10 @@ class KYCState(TypedDict, total=False):
     dedup_anomalies: list[dict[str, Any]]
     dedup_score_breakdown: dict[str, Any]
 
-    # Risk screening outputs (scaffolded; filled by later milestones)
+    # Compliance screening outputs (OpenSanctions sanctions + PEP)
     sanctions_status: str
     pep_status: str
+    compliance_matches: list[dict[str, Any]]
     adverse_media_findings: str
     risk_decision: str
     reference_id: str
@@ -123,7 +124,7 @@ def build_kyc_graph():
     g.add_node("dedup_l3_anomaly", dedup_l3_anomaly)
     g.add_node("terminate_reject", terminate_reject)
     g.add_node("terminate_manual_review", terminate_manual_review)
-    g.add_node("risk_screening", risk_screening)
+    g.add_node("compliance_screening", compliance_screening)
     g.add_node("adverse_media_scan", adverse_media_scan)
     g.add_node("aggregate", aggregate)
 
@@ -153,11 +154,11 @@ def build_kyc_graph():
         {
             "terminate_reject": "terminate_reject",
             "terminate_manual_review": "terminate_manual_review",
-            "continue": "risk_screening",
+            "continue": "compliance_screening",
         },
     )
 
-    g.add_edge("risk_screening", "adverse_media_scan")
+    g.add_edge("compliance_screening", "adverse_media_scan")
     g.add_edge("adverse_media_scan", "aggregate")
     g.add_edge("aggregate", END)
     g.add_edge("terminate_reject", END)

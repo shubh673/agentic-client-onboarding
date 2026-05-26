@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     COGNITO_CLIENT_ID: str
     COGNITO_CLIENT_SECRET: str
 
+    # OpenSanctions — sanctions + PEP screening (Stage 3 compliance agent).
+    # When OPENSANCTIONS_API_KEY is unset the screening node falls back to a
+    # dev stub so local runs still flow through; set it to screen for real.
+    OPENSANCTIONS_API_KEY: str | None = None
+    OPENSANCTIONS_BASE_URL: str = "https://api.opensanctions.org"
+    OPENSANCTIONS_DATASET: str = "default"
+    OPENSANCTIONS_SCORE_THRESHOLD: float = 0.7
+    OPENSANCTIONS_TIMEOUT_S: float = 10.0
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

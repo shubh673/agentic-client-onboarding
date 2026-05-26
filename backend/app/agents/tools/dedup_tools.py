@@ -1,14 +1,17 @@
 """Async DB tools backing the Stage-3 KYC dedup layers.
 
-Layer 1 — `find_exact_identifier_matches`: indexed equality OR across PAN /
-Aadhaar / mobile / email. ~1-2ms with the indexes added in migration 007.
+Layer 1 — `find_exact_identifier_matches`: indexed equality OR across the
+unique government identifiers, PAN and Aadhaar. A collision here is a true
+identity duplicate -> hard reject. ~1-2ms with the indexes from migration 007.
 
 Layer 2 — `find_fuzzy_candidates`: pg_trgm prefilter on (dob, full_name).
 Returns a small shortlist (~tens) that Python-side scoring then ranks.
 
-Layer 3 — `find_cross_field_anomalies`: identifier reuse with a different
-*other* identifier (e.g., same phone but different PAN). Catches fraud
-signals that L1 misses because no single field collides.
+Layer 3 — `find_cross_field_anomalies`: a reused *contact* identifier (mobile
+or email) paired with a DIFFERENT PAN/Aadhaar. These deliberately fall through
+L1 (which only keys on PAN/Aadhaar) because sharing a phone or email is not
+proof of a duplicate identity — it is a fraud signal that warrants review
+rather than an outright reject.
 
 All three exclude the current application (`application_id`) and exclude
 terminal-state rows (`rejected`, `cancelled`).
@@ -59,19 +62,18 @@ async def find_exact_identifier_matches(
     application_id: uuid.UUID | None,
     pan_number: str,
     aadhaar_number: str,
-    email: str,
-    mobile: str,
 ) -> list[Application]:
-    """Layer 1 — exact equality on any of the four hard identifiers."""
+    """Layer 1 — exact equality on the unique government IDs (PAN / Aadhaar).
+
+    Mobile and email are intentionally *not* matched here: a shared contact
+    detail is handled as a cross-field anomaly in Layer 3 (manual review),
+    not an outright duplicate.
+    """
     predicates = []
     if pan_number:
         predicates.append(Application.pan_number == pan_number)
     if aadhaar_number:
         predicates.append(Application.aadhaar_number == aadhaar_number)
-    if email:
-        predicates.append(Application.email == email)
-    if mobile:
-        predicates.append(Application.mobile == mobile)
     if not predicates:
         return []
 
