@@ -225,21 +225,49 @@ async def _play_stage_2(app_id: uuid.UUID) -> bool:
     return False
 
 
-async def _play_stage_3(app_id: uuid.UUID) -> None:
-    """Delegate Stage 3 to KYCAgent (dummy). Logs stream live."""
+async def _play_stage_3(app_id: uuid.UUID) -> bool:
+    """Delegate Stage 3 to the KYC LangGraph (dedup + risk screening).
+
+    Returns True if the application is cleared to continue, False if it was
+    rejected or routed to manual review (in which case status + reason are
+    already persisted by this function).
+    """
     app = await _load_app_with_docs(app_id)
     if app is None:
-        return
+        return False
 
     async def emit(stage: int, level: str, message: str) -> None:
         await _emit_log(app_id, stage, level, message)
 
-    await KYCAgent().run(
+    result = await KYCAgent().run(
+        application_id=app.id,
         full_name=app.full_name,
         pan_number=app.pan_number,
         aadhaar_number=app.aadhaar_number,
+        email=app.email,
+        mobile=app.mobile,
+        dob=app.dob.isoformat() if app.dob else "",
         emit_log=emit,
     )
+
+    if result.approved:
+        return True
+
+    if result.manual_review:
+        await _set_status(
+            app_id,
+            current_stage=3,
+            status="manual_review",
+            verification_reason=result.final_reason or "manual_review_required",
+        )
+    else:
+        await _set_status(
+            app_id,
+            current_stage=3,
+            status="stage_3_failed",
+            verification_reason=result.final_reason or "kyc_rejected",
+        )
+    return False
 
 
 async def _run_stage_2_and_after(app_id: uuid.UUID) -> None:
@@ -262,7 +290,12 @@ async def _run_stage_2_and_after(app_id: uuid.UUID) -> None:
         await _set_status(app_id, current_stage=stage, status=f"stage_{stage}_running")
         await _broadcast_application(app_id)
         if stage == 3:
-            await _play_stage_3(app_id)
+            cleared = await _play_stage_3(app_id)
+            if not cleared:
+                # _play_stage_3 has already persisted rejected / manual_review
+                # status + verification_reason. Halt the pipeline.
+                await _broadcast_application(app_id)
+                return
         else:
             await _play_stage(app_id, stage)
         await _set_status(

@@ -51,9 +51,11 @@ const STAGES = [
   },
   {
     title: "KYC Agent",
-    description: "Reused subagent: sanctions, PEP, and adverse media screening.",
-    runningCopy: "Running KYC checks — sanctions, PEP, and adverse media screening…",
+    description: "Reused subagent: dedup, sanctions, PEP, and adverse media screening.",
+    runningCopy: "Running KYC checks — dedup, sanctions, PEP, and adverse media…",
     pendingCopy: "Pending KYC — agent will start screening shortly.",
+    failedCopy: "KYC rejected — application blocked.",
+    manualReviewCopy: "KYC flagged for manual review by compliance.",
     icon: ShieldCheck,
   },
   {
@@ -95,12 +97,20 @@ const STAGES = [
 
 type StageMeta = (typeof STAGES)[number];
 
+function isFailedAt(idx1: number, app: Application): boolean {
+  return app.status === `stage_${idx1}_failed`;
+}
+
+function isManualReviewAt(idx1: number, app: Application): boolean {
+  return idx1 === app.current_stage && app.status === "manual_review";
+}
+
 function statusFor(idx1: number, app: Application): Status {
   if (app.status === "completed") return "complete";
-  // A Stage 2 failure halts the runner at current_stage=2; treat it as the
-  // active card (so the re-upload panel renders inside it) until the customer
-  // re-submits and the runner advances past Stage 2.
-  if (idx1 === 2 && app.status === "stage_2_failed") return "active";
+  // A Stage failure halts the runner at current_stage=idx1; treat it as the
+  // active card (so the failure/reason panel renders inside it).
+  if (isFailedAt(idx1, app)) return "active";
+  if (isManualReviewAt(idx1, app)) return "active";
   if (idx1 < app.current_stage) return "complete";
   if (idx1 === app.current_stage) return "active";
   return "locked";
@@ -117,13 +127,36 @@ function describe(idx1: number, stage: StageMeta, app: Application, status: Stat
   }
   // active
   if (idx1 === 1) return stage.description;
-  if (idx1 === 2 && app.status === "stage_2_failed") {
+  if (isFailedAt(idx1, app)) {
     return ("failedCopy" in stage && stage.failedCopy) || stage.description;
+  }
+  if (isManualReviewAt(idx1, app)) {
+    return ("manualReviewCopy" in stage && stage.manualReviewCopy) || stage.description;
   }
   if (isRunning(idx1, app)) {
     return ("runningCopy" in stage && stage.runningCopy) || stage.description;
   }
   return ("pendingCopy" in stage && stage.pendingCopy) || stage.description;
+}
+
+const KYC_REASON_LABELS: Record<string, string> = {
+  duplicate_identifier:
+    "Duplicate identifier — PAN, Aadhaar, email, or mobile already on file with another application.",
+  possible_duplicate_fuzzy:
+    "Possible duplicate — name and date of birth closely match an existing application.",
+  cross_field_anomaly:
+    "Cross-field anomaly — one of the supplied identifiers has been previously paired with a different PAN/Aadhaar.",
+  risk_screening_manual_review:
+    "Risk screening (sanctions / PEP / adverse media) returned a signal that requires human review.",
+  manual_review_required: "Flagged for manual review by compliance.",
+  kyc_rejected: "KYC screening rejected the application.",
+  kyc_agent_error:
+    "The KYC agent failed mid-run. A compliance officer will retry shortly.",
+};
+
+function friendlyReason(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  return KYC_REASON_LABELS[reason] ?? reason.replaceAll("_", " ");
 }
 
 export function ApplicationDetail() {
@@ -255,12 +288,19 @@ export function ApplicationDetail() {
                   <Badge variant="default" className="bg-primary text-primary-foreground">
                     <ArrowRight className="mr-0.5 size-3" /> Complete
                   </Badge>
-                ) : status === "active" && idx1 === 2 && app.status === "stage_2_failed" ? (
+                ) : status === "active" && isFailedAt(idx1, app) ? (
                   <Badge
                     variant="default"
                     className="gap-1 border-destructive/30 bg-destructive/10 text-destructive"
                   >
-                    <AlertTriangle className="size-3" /> Failed
+                    <AlertTriangle className="size-3" /> {idx1 === 2 ? "Failed" : "Rejected"}
+                  </Badge>
+                ) : status === "active" && isManualReviewAt(idx1, app) ? (
+                  <Badge
+                    variant="default"
+                    className="gap-1 border-amber-200 bg-amber-50 text-amber-700"
+                  >
+                    <AlertTriangle className="size-3" /> Manual review
                   </Badge>
                 ) : status === "active" && running ? (
                   <Badge variant="default" className="gap-1">
@@ -274,6 +314,9 @@ export function ApplicationDetail() {
               {idx1 === 1 && <SubmittedSummary app={app} />}
               {idx1 === 2 && app.status === "stage_2_failed" && (
                 <ReuploadPanel app={app} />
+              )}
+              {idx1 === 3 && (isFailedAt(3, app) || isManualReviewAt(3, app)) && (
+                <KYCReasonPanel app={app} />
               )}
             </StepCard>
           );
@@ -309,6 +352,33 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between gap-4 py-0.5">
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="truncate font-medium text-foreground">{value}</dd>
+    </div>
+  );
+}
+
+function KYCReasonPanel({ app }: { app: Application }) {
+  const isManualReview = app.status === "manual_review";
+  const reason = friendlyReason(app.verification_reason) ?? (
+    isManualReview ? "Flagged for manual review." : "KYC screening rejected the application."
+  );
+  const palette = isManualReview
+    ? "border-amber-200 bg-amber-50 text-amber-800"
+    : "border-destructive/30 bg-destructive/5 text-destructive";
+  const heading = isManualReview ? "Manual review required" : "KYC rejected";
+  const followUp = isManualReview
+    ? "A compliance officer will review your application and reach out with next steps."
+    : "This application has been blocked. If you believe this is a mistake, contact support.";
+
+  return (
+    <div className={`rounded-lg border p-4 ${palette}`}>
+      <div className="flex items-start gap-2 text-sm">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        <div>
+          <p className="font-medium">{heading}</p>
+          <p className="mt-0.5">{reason}</p>
+          <p className="mt-1 opacity-90">{followUp}</p>
+        </div>
+      </div>
     </div>
   );
 }

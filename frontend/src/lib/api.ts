@@ -108,6 +108,55 @@ export async function reuploadDocuments(
   return data;
 }
 
+export type ChatbotResponse = {
+  thread_id: string;
+  message: string;
+  expect: "text" | "file";
+  doc: string | null;
+  complete: boolean;
+  data: {
+    full_name?: string;
+    dob?: string;
+    mobile?: string;
+    email?: string;
+    address?: string;
+    pan?: string;
+    aadhaar?: string;
+  };
+  uploads: { pan_card: boolean; aadhaar_card: boolean };
+  application_id?: string | null;
+  submission_error?: string | null;
+};
+
+export async function chatbotStart(): Promise<ChatbotResponse> {
+  const { data } = await api.post<ChatbotResponse>("/chatbot/start");
+  return data;
+}
+
+export async function chatbotMessage(
+  thread_id: string,
+  text: string,
+): Promise<ChatbotResponse> {
+  const { data } = await api.post<ChatbotResponse>("/chatbot/message", {
+    thread_id,
+    text,
+  });
+  return data;
+}
+
+export async function chatbotUpload(
+  thread_id: string,
+  file: File,
+): Promise<ChatbotResponse> {
+  const fd = new FormData();
+  fd.append("thread_id", thread_id);
+  fd.append("file", file);
+  const { data } = await api.post<ChatbotResponse>("/chatbot/upload", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
 export function openApplicationSocket(
   id: string,
   onEvent: (event: ApplicationEvent) => void,

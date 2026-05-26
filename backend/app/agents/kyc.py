@@ -1,55 +1,202 @@
-"""Stage 3 — KYC agent (DUMMY).
+"""Stage 3 — KYC LangGraph subgraph.
 
-This agent is a stub: it calls `run_kyc_check` (which currently returns a
-hardcoded "approved" response) and emits the same log trail a real KYC
-provider integration would. The shape — async `run`, structured result
-dataclass, log callback — matches the reference LangGraph project so you
-can swap the body of `app.agents.tools.kyc_tools.run_kyc_check` for a real
-provider call later without touching the orchestrator.
+Three layers run in sequence, short-circuiting on hit:
 
-To integrate a real provider:
-    1. Replace the body of `run_kyc_check` with the provider SDK / HTTP call.
-    2. Keep the return shape (`status`, `sanctions`, `pep`, `adverse_media`,
-       `reference_id`) — or extend it; this agent only reads `status` and
-       `reference_id`.
-    3. Nothing in `stage_runner.py` needs to change.
+    START
+      |-> dedup_l1_exact      (PAN/Aadhaar/mobile/email collision)
+      |     hit  -> terminate_reject          -> END
+      |     clear ->
+      |-> dedup_l2_fuzzy      (name + DOB, weighted multi-algorithm score)
+      |     hit  -> terminate_manual_review   -> END
+      |     clear ->
+      |-> dedup_l3_anomaly    (cross-field reuse with a different PAN, etc.)
+      |     hit  -> terminate_manual_review   -> END
+      |     clear ->
+      |-> risk_screening      (today: dummy run_kyc_check; later: OpenSanctions)
+      |-> adverse_media_scan  (today: passthrough; later: LLM + web search)
+      |-> aggregate           -> END
+
+Reusability
+-----------
+The compiled graph is exposed via `build_kyc_graph()` / `get_kyc_graph()` so
+any other LangGraph can plug it in as a subgraph:
+
+    from app.agents.kyc import build_kyc_graph
+    parent.add_node("kyc", build_kyc_graph())
+
+Runtime dependencies — DB session, log sink, stage number — flow through
+`RunnableConfig["configurable"]`, not through state. That keeps the parent's
+state schema free of KYC internals: it only has to carry the input fields
+(`full_name`, `pan_number`, `aadhaar_number`, `email`, `mobile`, `dob`,
+`application_id`) and read back the result fields (`approved`,
+`manual_review`, `final_reason`).
+
+Stage-3 backwards compatibility
+-------------------------------
+`KYCAgent.run(...)` is preserved as a thin adapter so the existing
+`stage_runner._play_stage_3` keeps working — it just gets richer kwargs
+(application_id, email, mobile, dob) and a richer `KYCResult` back.
 """
 from __future__ import annotations
 
-import asyncio
-import logging
+import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Optional, TypedDict
 
-from app.agents.tools.kyc_tools import run_kyc_check
+from langgraph.graph import END, START, StateGraph
+from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = logging.getLogger(__name__)
+from app.agents.kyc_nodes import (
+    adverse_media_scan,
+    aggregate,
+    dedup_l1_exact,
+    dedup_l2_fuzzy,
+    dedup_l3_anomaly,
+    dedup_route,
+    risk_screening,
+    terminate_manual_review,
+    terminate_reject,
+)
+from app.database import SessionLocal
 
 EmitLog = Callable[[int, str, str], Awaitable[None]]
+
+
+class KYCState(TypedDict, total=False):
+    # Inputs
+    application_id: Optional[str]
+    full_name: str
+    dob: str
+    mobile: str
+    email: str
+    pan_number: str
+    aadhaar_number: str
+
+    # Dedup outputs
+    dedup_decision: str        # "clear" | "duplicate" | "suspicious"
+    dedup_layer: int           # 0 (cleared) | 1 | 2 | 3
+    dedup_matches: list[dict[str, Any]]
+    dedup_anomalies: list[dict[str, Any]]
+    dedup_score_breakdown: dict[str, Any]
+
+    # Risk screening outputs (scaffolded; filled by later milestones)
+    sanctions_status: str
+    pep_status: str
+    adverse_media_findings: str
+    risk_decision: str
+    reference_id: str
+
+    # Final outcome
+    approved: bool
+    manual_review: bool
+    final_reason: str
 
 
 @dataclass
 class KYCResult:
     approved: bool = False
+    manual_review: bool = False
+    final_reason: str = ""
     reference_id: str = ""
     details: dict[str, Any] = field(default_factory=dict)
 
 
-class KYCAgent:
-    """Dummy Stage 3 agent — emits the canonical sanctions/PEP/adverse-media
-    log trail and returns the result from `run_kyc_check`.
+# ---------------------------------------------------------------------------
+# Graph construction
+# ---------------------------------------------------------------------------
 
-    The small `asyncio.sleep` calls in between log lines preserve the
-    "agent is doing work" pacing the UI was built around. Drop them when
-    `run_kyc_check` becomes a real (and therefore slow) network call.
+_graph = None
+
+
+def build_kyc_graph():
+    """Build and compile the KYC subgraph.
+
+    No checkpointer — the KYC subgraph is short-lived and stateless across
+    invocations. A parent graph can wrap this with its own checkpointer if
+    it needs durable resume semantics.
+    """
+    g = StateGraph(KYCState)
+
+    g.add_node("dedup_l1_exact", dedup_l1_exact)
+    g.add_node("dedup_l2_fuzzy", dedup_l2_fuzzy)
+    g.add_node("dedup_l3_anomaly", dedup_l3_anomaly)
+    g.add_node("terminate_reject", terminate_reject)
+    g.add_node("terminate_manual_review", terminate_manual_review)
+    g.add_node("risk_screening", risk_screening)
+    g.add_node("adverse_media_scan", adverse_media_scan)
+    g.add_node("aggregate", aggregate)
+
+    g.add_edge(START, "dedup_l1_exact")
+
+    g.add_conditional_edges(
+        "dedup_l1_exact",
+        dedup_route,
+        {
+            "terminate_reject": "terminate_reject",
+            "terminate_manual_review": "terminate_manual_review",
+            "continue": "dedup_l2_fuzzy",
+        },
+    )
+    g.add_conditional_edges(
+        "dedup_l2_fuzzy",
+        dedup_route,
+        {
+            "terminate_reject": "terminate_reject",
+            "terminate_manual_review": "terminate_manual_review",
+            "continue": "dedup_l3_anomaly",
+        },
+    )
+    g.add_conditional_edges(
+        "dedup_l3_anomaly",
+        dedup_route,
+        {
+            "terminate_reject": "terminate_reject",
+            "terminate_manual_review": "terminate_manual_review",
+            "continue": "risk_screening",
+        },
+    )
+
+    g.add_edge("risk_screening", "adverse_media_scan")
+    g.add_edge("adverse_media_scan", "aggregate")
+    g.add_edge("aggregate", END)
+    g.add_edge("terminate_reject", END)
+    g.add_edge("terminate_manual_review", END)
+
+    return g.compile()
+
+
+def get_kyc_graph():
+    global _graph
+    if _graph is None:
+        _graph = build_kyc_graph()
+    return _graph
+
+
+# ---------------------------------------------------------------------------
+# Adapter — preserves the legacy KYCAgent.run(...) call shape used by
+# stage_runner so the orchestrator only needs a small kwargs update.
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def _maybe_session(db: AsyncSession | None):
+    """Yield the passed session if non-None, otherwise open a fresh one."""
+    if db is not None:
+        yield db
+        return
+    async with SessionLocal() as session:
+        yield session
+
+
+class KYCAgent:
+    """Thin wrapper around the compiled KYC graph.
+
+    The plug-and-play unit is `build_kyc_graph()` / `get_kyc_graph()`. This
+    class exists so existing callers (stage_runner, future callers wanting a
+    one-shot result object) don't have to deal with raw LangGraph state.
     """
 
     STAGE = 3
-
-    # Per-substep pacing — kept tiny so the user sees each line land.
-    SANCTIONS_DELAY_S = 0.5
-    PEP_DELAY_S = 0.5
-    ADVERSE_MEDIA_DELAY_S = 0.5
 
     async def run(
         self,
@@ -58,65 +205,49 @@ class KYCAgent:
         pan_number: str,
         aadhaar_number: str,
         emit_log: EmitLog,
+        application_id: uuid.UUID | str | None = None,
+        email: str = "",
+        mobile: str = "",
+        dob: str = "",
+        db: AsyncSession | None = None,
     ) -> KYCResult:
         await emit_log(self.STAGE, "info", "KYC agent invoked")
 
-        # Call the (currently dummy) provider tool. Wrapped in to_thread in
-        # case the real integration is a blocking SDK call later.
-        try:
-            response = await asyncio.to_thread(
-                run_kyc_check, full_name, pan_number, aadhaar_number
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("KYC provider call failed")
-            await emit_log(self.STAGE, "error", f"KYC provider call failed: {exc}")
-            return KYCResult(approved=False, reference_id="", details={"error": str(exc)})
+        graph = get_kyc_graph()
+        initial_state: KYCState = {
+            "application_id": str(application_id) if application_id else None,
+            "full_name": full_name,
+            "pan_number": pan_number,
+            "aadhaar_number": aadhaar_number,
+            "email": email,
+            "mobile": mobile,
+            "dob": dob,
+        }
 
-        # Replay the canonical log trail. With a real provider these
-        # status values come from `response`; for the dummy they are fixed.
-        await emit_log(self.STAGE, "info", "Sanctions list screening (OFAC, UN, EU)")
-        await asyncio.sleep(self.SANCTIONS_DELAY_S)
-        await emit_log(
-            self.STAGE,
-            "success" if response.get("sanctions") == "clear" else "error",
-            f"Sanctions screening: {response.get('sanctions', 'unknown')}",
+        async with _maybe_session(db) as session:
+            config = {
+                "configurable": {
+                    "db_session": session,
+                    "emit_log": emit_log,
+                    "stage": self.STAGE,
+                }
+            }
+            try:
+                final = await graph.ainvoke(initial_state, config=config)
+            except Exception as exc:  # noqa: BLE001
+                await emit_log(self.STAGE, "error", f"KYC agent error: {exc}")
+                return KYCResult(
+                    approved=False,
+                    manual_review=False,
+                    final_reason="kyc_agent_error",
+                    reference_id="",
+                    details={"error": str(exc)},
+                )
+
+        return KYCResult(
+            approved=bool(final.get("approved", False)),
+            manual_review=bool(final.get("manual_review", False)),
+            final_reason=str(final.get("final_reason", "")),
+            reference_id=str(final.get("reference_id", "")),
+            details=dict(final),
         )
-
-        await emit_log(self.STAGE, "info", "PEP (politically exposed persons) screening")
-        await asyncio.sleep(self.PEP_DELAY_S)
-        await emit_log(
-            self.STAGE,
-            "success" if response.get("pep") == "clear" else "error",
-            f"PEP screening: {response.get('pep', 'unknown')}",
-        )
-
-        await emit_log(self.STAGE, "info", "Adverse media scan")
-        await asyncio.sleep(self.ADVERSE_MEDIA_DELAY_S)
-        await emit_log(
-            self.STAGE,
-            "success" if response.get("adverse_media") == "no_hits" else "error",
-            f"Adverse media: {response.get('adverse_media', 'unknown')}",
-        )
-
-        approved = response.get("status") == "approved"
-        reference_id = response.get("reference_id", "")
-
-        if approved:
-            await emit_log(
-                self.STAGE,
-                "success",
-                f"KYC approved (reference {reference_id})",
-            )
-            await emit_log(
-                self.STAGE,
-                "success",
-                "Stage 3 complete — handing off to Eligibility agent",
-            )
-        else:
-            await emit_log(
-                self.STAGE,
-                "error",
-                f"KYC not approved (reference {reference_id})",
-            )
-
-        return KYCResult(approved=approved, reference_id=reference_id, details=response)
