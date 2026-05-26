@@ -53,7 +53,8 @@ from app.agents.kyc import KYCAgent, KYCResult  # noqa: E402
 # ---------------------------------------------------------------------------
 # EDIT ME — add / change the applicants you want to run through KYC.
 # Fields: full_name, pan_number, aadhaar_number, email, mobile, dob (ISO),
-#         application_id (optional — leave out / None for a brand-new applicant).
+#         address, application_id (optional — leave out / None for a new applicant).
+# (full_name + dob + address are forwarded to OpenSanctions, with nationality=IN.)
 #
 # These four cases are built against the existing DB record (status=completed):
 #   Hisham Islah | DOB 2003-11-01 | PAN ABCDE1234G | Aadhaar 123456789124
@@ -72,6 +73,7 @@ TEST_CASES: list[dict[str, str]] = [
         "email": "hisham.islah@arttechgroup.com",
         "mobile": "+918078808923",
         "dob": "2003-11-01",
+        "address": "kakkanad",
     },
     # CASE 2 — L1 PASSES, L2 FLAGS (fuzzy name + same DOB).
     # All four identifiers are NEW (so Layer 1, which only compares identifiers,
@@ -86,6 +88,7 @@ TEST_CASES: list[dict[str, str]] = [
         "email": "hisham.alt@example.com",
         "mobile": "+919999900000",
         "dob": "2003-11-01",
+        "address": "kakkanad",
     },
     # CASE 3 — L1 & L2 PASS, L3 FLAGS (cross-field anomaly / fraud signal).
     # Reuses Hisham's MOBILE (+918078808923) but with a DIFFERENT PAN, Aadhaar,
@@ -99,6 +102,7 @@ TEST_CASES: list[dict[str, str]] = [
         "email": "shubham.singh@example.com",
         "mobile": "+918078808923",
         "dob": "1995-05-05",
+        "address": "Mumbai",
     },
     # CASE 4 — ALL THREE CLEAR (fresh applicant) -> compliance -> approval.
     # Different name, different DOB, all-new identifiers: L1/L2/L3 clear, the
@@ -110,6 +114,7 @@ TEST_CASES: list[dict[str, str]] = [
         "email": "shubham.singh@example.com",
         "mobile": "+919812345678",
         "dob": "1992-06-20",
+        "address": "Bengaluru",
     },
 ]
 
@@ -165,6 +170,7 @@ async def _run_case(case: dict[str, str]) -> None:
             email=case.get("email", ""),
             mobile=case.get("mobile", ""),
             dob=case.get("dob", ""),
+            address=case.get("address", ""),
             application_id=case.get("application_id"),
             emit_log=emit_log,
         )
@@ -184,6 +190,7 @@ async def main(interactive: bool) -> None:
             "email": input("Email: ").strip(),
             "mobile": input("Mobile: ").strip(),
             "dob": input("DOB (YYYY-MM-DD): ").strip(),
+            "address": input("Address: ").strip(),
         }
         await _run_case(case)
     else:

@@ -277,6 +277,7 @@ async def compliance_screening(state: dict, config: RunnableConfig) -> dict:
     result = await screen_person(
         full_name=state.get("full_name", ""),
         dob=state.get("dob", ""),
+        address=state.get("address", ""),
     )
 
     if result.error:

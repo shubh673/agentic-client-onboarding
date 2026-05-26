@@ -247,6 +247,7 @@ async def _play_stage_3(app_id: uuid.UUID) -> bool:
         email=app.email,
         mobile=app.mobile,
         dob=app.dob.isoformat() if app.dob else "",
+        address=app.address or "",
         emit_log=emit,
     )
 

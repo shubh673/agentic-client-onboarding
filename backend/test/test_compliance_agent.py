@@ -48,7 +48,17 @@ from app.agents.tools.opensanctions import ComplianceResult, screen_person  # no
 # ---------------------------------------------------------------------------
 TEST_CASES: list[dict[str, str]] = [
     {"full_name": "Vladimir Putin", "dob": "1952-10-07"},        # expect: sanctions + PEP hit
-    {"full_name": "Hisham Islah", "dob": "2003-11-01"},  # expect: clear
+    {"full_name": "Hisham Islah", "dob": "2003-11-01"},          # expect: clear
+
+    # DOB disambiguation demo — the OpenSanctions record for the politician
+    # "Rahul Gandhi" carries a real birthDate (1970-06-19), so the DOB you send
+    # actually changes the result:
+    {"full_name": "Rahul Gandhi", "dob": "1970-06-19"},          # PEP's real DOB -> PEP HIT
+    {"full_name": "Rahul Gandhi", "dob": "1996-08-12"},          # a namesake's DOB -> CLEAR (passes)
+
+    # Contrast: "Shubham Singh" matches a PEP whose record has NO birthDate, so
+    # no DOB can change the outcome (it stays a hit). The only lever there is the
+    # score threshold. (200-01-01 is also a malformed date — left as-is.)
     {"full_name": "Shubham Singh", "dob": "200-01-01"},
 ]
 
@@ -84,8 +94,9 @@ def _print_result(full_name: str, dob: str, result: ComplianceResult) -> None:
         print("MATCHES    : none")
 
 
-async def _run_case(full_name: str, dob: str) -> None:
-    result = await screen_person(full_name=full_name, dob=dob)
+async def _run_case(full_name: str, dob: str, address: str = "") -> None:
+    # nationality defaults to "IN" inside screen_person.
+    result = await screen_person(full_name=full_name, dob=dob, address=address)
     _print_result(full_name, dob, result)
 
 
@@ -93,10 +104,11 @@ async def main(interactive: bool) -> None:
     if interactive:
         full_name = input("Full name: ").strip()
         dob = input("DOB (YYYY-MM-DD or YYYY, blank to skip): ").strip()
-        await _run_case(full_name, dob)
+        address = input("Address (blank to skip): ").strip()
+        await _run_case(full_name, dob, address)
     else:
         for case in TEST_CASES:
-            await _run_case(case.get("full_name", ""), case.get("dob", ""))
+            await _run_case(case.get("full_name", ""), case.get("dob", ""), case.get("address", ""))
     print("=" * 70)
 
 

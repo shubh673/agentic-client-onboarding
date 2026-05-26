@@ -72,6 +72,7 @@ class KYCState(TypedDict, total=False):
     email: str
     pan_number: str
     aadhaar_number: str
+    address: str
 
     # Dedup outputs
     dedup_decision: str        # "clear" | "duplicate" | "suspicious"
@@ -210,6 +211,7 @@ class KYCAgent:
         email: str = "",
         mobile: str = "",
         dob: str = "",
+        address: str = "",
         db: AsyncSession | None = None,
     ) -> KYCResult:
         await emit_log(self.STAGE, "info", "KYC agent invoked")
@@ -223,6 +225,7 @@ class KYCAgent:
             "email": email,
             "mobile": mobile,
             "dob": dob,
+            "address": address,
         }
 
         async with _maybe_session(db) as session:

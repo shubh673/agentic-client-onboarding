@@ -71,11 +71,17 @@ class ComplianceResult:
         return not self.error and not self.sanctions_hit and not self.pep_hit
 
 
-def _build_query(full_name: str, dob: str) -> dict:
+def _build_query(full_name: str, dob: str, address: str, nationality: str) -> dict:
     properties: dict[str, list[str]] = {"name": [full_name]}
     if dob:
         # OpenSanctions accepts full or partial ISO dates ("1990-01-15", "1990").
         properties["birthDate"] = [dob]
+    if nationality:
+        # Country/nationality mismatch penalises the score, filtering out
+        # foreign near-namesakes (a common source of PEP false positives).
+        properties["nationality"] = [nationality]
+    if address:
+        properties["address"] = [address]
     return {"queries": {"q": {"schema": "Person", "properties": properties}}}
 
 
@@ -105,8 +111,13 @@ def _parse_results(results: list[dict], threshold: float, base_url: str) -> Comp
     return out
 
 
-async def screen_person(*, full_name: str, dob: str = "") -> ComplianceResult:
+async def screen_person(
+    *, full_name: str, dob: str = "", address: str = "", nationality: str = "IN"
+) -> ComplianceResult:
     """Screen one person against sanctions + PEP via a single OpenSanctions call.
+
+    `nationality` defaults to "IN" (this is an India KYC flow) to suppress
+    foreign near-namesake false positives; `address` adds a weak extra signal.
 
     Returns a `ComplianceResult`. On a missing key, HTTP error, or unparseable
     response the result carries `error` (and no hits) so the caller can route to
@@ -122,7 +133,7 @@ async def screen_person(*, full_name: str, dob: str = "") -> ComplianceResult:
 
     url = f"{settings.OPENSANCTIONS_BASE_URL.rstrip('/')}/match/{settings.OPENSANCTIONS_DATASET}"
     headers = {"Authorization": f"ApiKey {api_key}"}
-    body = _build_query(full_name.strip(), dob.strip())
+    body = _build_query(full_name.strip(), dob.strip(), address.strip(), nationality.strip())
 
     try:
         async with httpx.AsyncClient(timeout=settings.OPENSANCTIONS_TIMEOUT_S) as client:
