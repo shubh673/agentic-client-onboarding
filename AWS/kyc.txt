@@ -3,6 +3,15 @@ Layer 1 — Exact match on identifiers. Check if PAN, Aadhaar, phone, or email a
 Layer 2 — Fuzzy match on names + DOB. This is for the cases where someone applies again with slightly different information (typo, married name, English vs vernacular spelling). You filter by DOB first, then compute name similarity on the small remaining set. Runs in 20-30ms.
 Layer 3 — Cross-field anomaly check. This is the fraud-detection layer. It runs queries like "is this phone already used by someone with a different PAN?" These don't find duplicates — they find suspicious patterns. Runs in 10ms.
 
+ START
+   └─ dedup_l1_exact ──hit──> terminate_reject ─────────────────> END
+                   └─ clear ──> dedup_l2_fuzzy ──hit──> terminate_manual_review ──> END
+                                             └─ clear ──> dedup_l3_anomaly ──hit──> terminate_manual_review ──> END
+                                                                         └─ clear ──> risk_screening
+                                                                                           └──> adverse_media_scan
+                                                                                                     └──> aggregate ──> END
+
+
 KYC Risk Scoring Agent
 Step 1 — Sanctions + PEP in one API call() OpenSanctions api 30 days free tier 
 Step 2 — Adverse media via LLM
