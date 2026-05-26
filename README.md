@@ -52,7 +52,7 @@ Open `http://localhost:5173`.
 | # | Stage                            | Status        |
 |---|----------------------------------|---------------|
 | 1 | Customer Application Initiation  | Implemented   |
-| 2 | Document Verification            | Placeholder   |
+| 2 | Document Verification            | Implemented   |
 | 3 | KYC Agent                        | Placeholder   |
 | 4 | Eligibility                      | Placeholder   |
 | 5 | Pricing                          | Placeholder   |
