@@ -28,10 +28,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.onboarding_chat import (
     ALLOWED_EXTS,
     MAX_BYTES,
+    pending_expect,
     resume_session,
     session_values,
     start_session,
 )
+from app.agents.tools.document_tools import OcrError, ocr_file_bytes
 from app.config import get_settings
 from app.database import get_db
 from app.models import Customer
@@ -197,11 +199,34 @@ async def upload(
             f"File is over {MAX_BYTES // (1024 * 1024)} MB.",
         )
 
-    stored = UPLOAD_DIR / f"{thread_id}-{uuid.uuid4().hex}{suffix}"
-    stored.write_bytes(contents)
+    # Branch on what the conversation is currently waiting for. At a text step
+    # (details / confirm) an attached PDF is OCR'd via Textract and fed in as the
+    # user's reply so `extract` can pull out the KYC fields. At a file step
+    # (PAN / Aadhaar) the upload is stored as the document, as before.
+    if pending_expect(thread_id) == "file":
+        stored = UPLOAD_DIR / f"{thread_id}-{uuid.uuid4().hex}{suffix}"
+        stored.write_bytes(contents)
+        user_input = str(stored)
+    else:
+        try:
+            text = await asyncio.to_thread(
+                ocr_file_bytes, contents, suffix, thread_id
+            )
+        except OcrError as e:
+            logger.warning("chatbot OCR failed: %s", e)
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                "Couldn't process the file. Please type your details or try another file.",
+            ) from e
+        if not text.strip():
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Couldn't read any text from that file. Please type your details or try another file.",
+            )
+        user_input = f"[Details extracted from uploaded document]\n{text}"
 
     try:
-        snapshot = await asyncio.to_thread(resume_session, thread_id, str(stored))
+        snapshot = await asyncio.to_thread(resume_session, thread_id, user_input)
     except Exception as e:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e)) from e
 

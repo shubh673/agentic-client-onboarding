@@ -167,9 +167,10 @@ export function Chatbot() {
     e.target.value = "";
     if (!file || !threadId || busy) return;
 
+    const verb = latest?.expect === "file" ? "Uploaded" : "Attached";
     setMessages((prev) => [
       ...prev,
-      { id: nextId(), role: "user", content: `Uploaded: ${file.name}` },
+      { id: nextId(), role: "user", content: `${verb}: ${file.name}` },
     ]);
     setBusy(true);
     setError(null);
@@ -193,7 +194,7 @@ export function Chatbot() {
       ? "Onboarding complete"
       : expectingFile
         ? "Use the upload card above"
-        : "Type your reply…";
+        : "Type your reply… or attach a PDF";
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -315,7 +316,7 @@ export function Chatbot() {
               type="button"
               onClick={() => fileInputRef.current?.click()}
               aria-label="Attach file"
-              disabled={!expectingFile || busy}
+              disabled={busy || !threadId || (latest?.complete ?? false)}
               className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:hover:bg-transparent"
             >
               <Paperclip className="size-4" />

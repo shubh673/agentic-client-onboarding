@@ -43,3 +43,7 @@ def presigned_get(key: str, ttl_seconds: int) -> str:
         Params={"Bucket": get_settings().AWS_S3_BUCKET, "Key": key},
         ExpiresIn=ttl_seconds,
     )
+
+
+def delete_s3_object(key: str) -> None:
+    s3_client().delete_object(Bucket=get_settings().AWS_S3_BUCKET, Key=key)

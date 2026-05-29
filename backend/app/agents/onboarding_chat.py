@@ -324,27 +324,35 @@ def get_graph():
     return _graph
 
 
+def _read_interrupt(state) -> tuple[bool, Optional[str], str, Optional[str]]:
+    """Return (interrupted, prompt, expect, doc) for the first pending interrupt."""
+    for task in state.tasks:
+        for intr in task.interrupts:
+            v = intr.value if isinstance(intr.value, dict) else {}
+            return True, v.get("prompt"), v.get("expect", "text"), v.get("doc")
+    return False, None, "text", None
+
+
+def pending_expect(thread_id: str) -> str:
+    """Return 'text' | 'file' for the currently pending interrupt (or 'text').
+
+    Lets the upload endpoint tell apart the details/confirm steps (where an
+    attached PDF should be OCR'd and fed in as text) from the PAN/Aadhaar steps
+    (where the uploaded file is stored as a document).
+    """
+    app = get_graph()
+    config = {"configurable": {"thread_id": thread_id}}
+    _, _, expect, _ = _read_interrupt(app.get_state(config))
+    return expect
+
+
 def _snapshot(app, thread_id: str) -> dict:
     """Read graph state after invoke and return a JSON-serializable snapshot."""
     config = {"configurable": {"thread_id": thread_id}}
     state = app.get_state(config)
     values = state.values or {}
 
-    prompt: Optional[str] = None
-    expect = "text"
-    doc: Optional[str] = None
-    interrupted = False
-
-    for task in state.tasks:
-        for intr in task.interrupts:
-            interrupted = True
-            v = intr.value if isinstance(intr.value, dict) else {}
-            prompt = v.get("prompt")
-            expect = v.get("expect", "text")
-            doc = v.get("doc")
-            break
-        if interrupted:
-            break
+    interrupted, prompt, expect, doc = _read_interrupt(state)
 
     last_msg: Optional[str] = None
     if not interrupted:
