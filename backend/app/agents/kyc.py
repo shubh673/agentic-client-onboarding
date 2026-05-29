@@ -13,7 +13,6 @@ Three layers run in sequence, short-circuiting on hit:
       |     hit  -> terminate_manual_review   -> END
       |     clear ->
       |-> compliance_screening (OpenSanctions sanctions + PEP; hit -> manual review)
-      |-> adverse_media_scan  (today: passthrough; later: LLM + web search)
       |-> aggregate           -> END
 
 Reusability
@@ -48,7 +47,6 @@ from langgraph.graph import END, START, StateGraph
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.kyc_nodes import (
-    adverse_media_scan,
     aggregate,
     compliance_screening,
     dedup_l1_exact,
@@ -85,7 +83,6 @@ class KYCState(TypedDict, total=False):
     sanctions_status: str
     pep_status: str
     compliance_matches: list[dict[str, Any]]
-    adverse_media_findings: str
     risk_decision: str
     reference_id: str
 
@@ -126,7 +123,6 @@ def build_kyc_graph():
     g.add_node("terminate_reject", terminate_reject)
     g.add_node("terminate_manual_review", terminate_manual_review)
     g.add_node("compliance_screening", compliance_screening)
-    g.add_node("adverse_media_scan", adverse_media_scan)
     g.add_node("aggregate", aggregate)
 
     g.add_edge(START, "dedup_l1_exact")
@@ -159,8 +155,7 @@ def build_kyc_graph():
         },
     )
 
-    g.add_edge("compliance_screening", "adverse_media_scan")
-    g.add_edge("adverse_media_scan", "aggregate")
+    g.add_edge("compliance_screening", "aggregate")
     g.add_edge("aggregate", END)
     g.add_edge("terminate_reject", END)
     g.add_edge("terminate_manual_review", END)

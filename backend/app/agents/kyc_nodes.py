@@ -11,7 +11,7 @@ Decision flow (kept in sync with `build_kyc_graph` in `kyc.py`):
   L1 hit       -> terminate_reject          (status=rejected,       reason=duplicate_identifier)
   L2 hit       -> terminate_manual_review   (status=manual_review,  reason=possible_duplicate_fuzzy)
   L3 hit       -> terminate_manual_review   (status=manual_review,  reason=cross_field_anomaly)
-  all clear    -> compliance_screening -> adverse_media_scan -> aggregate (status driven by screening)
+  all clear    -> compliance_screening -> aggregate (status driven by screening)
 """
 from __future__ import annotations
 
@@ -323,24 +323,6 @@ async def compliance_screening(state: dict, config: RunnableConfig) -> dict:
         "compliance_matches": [m.to_dict() for m in result.matches],
         "risk_decision": "clear" if result.clear else "manual_review",
     }
-
-
-async def adverse_media_scan(state: dict, config: RunnableConfig) -> dict:
-    """Scaffold for the LLM-driven adverse-media web search.
-
-    Today: replays the value already produced by `risk_screening` so the
-    log trail is unchanged. Future: structured LLM call with web search
-    enabled over (name + DOB year + city/state).
-    """
-    finding = state.get("adverse_media_findings", "not_screened")
-    await _emit(config, "info", "Adverse media scan")
-    # TODO(adverse-media): replace with structured LLM + web search call.
-    await _emit(
-        config,
-        "error" if finding == "hits" else "info",
-        f"Adverse media: {finding}",
-    )
-    return {"adverse_media_findings": finding}
 
 
 # ---------------------------------------------------------------------------
