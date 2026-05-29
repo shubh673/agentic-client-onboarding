@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   Bot,
   CheckCircle2,
@@ -13,10 +15,11 @@ import {
 } from "lucide-react";
 
 import {
-  chatbotMessage,
-  chatbotStart,
-  chatbotUpload,
+  chatbotMessageStream,
+  chatbotStartStream,
+  chatbotUploadStream,
   type ChatbotResponse,
+  type ChatStreamHandlers,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +52,7 @@ export function Chatbot() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const startedRef = useRef(false);
+  const streamingIdRef = useRef<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -71,7 +75,16 @@ export function Chatbot() {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [input]);
 
-  const renderResponse = (resp: ChatbotResponse) => {
+  const showTyping = () => {
+    setMessages((prev) => [
+      ...prev,
+      { id: "typing", role: "assistant", kind: "typing" },
+    ]);
+  };
+
+  // Finalize a turn once the SSE `snapshot` arrives: set the streamed bubble to
+  // the authoritative text, then append the upload card / summary / handoff line.
+  const finalizeResponse = (resp: ChatbotResponse) => {
     setLatest(resp);
 
     const handoffLine = resp.application_id
@@ -80,25 +93,35 @@ export function Chatbot() {
         ? `Couldn't create the application: ${resp.submission_error}`
         : null;
 
-    setMessages((prev) => [
-      ...prev.filter((m) => !(m.role === "assistant" && m.kind === "typing")),
-      ...(resp.message
-        ? ([
-            { id: nextId(), role: "assistant", kind: "text", content: resp.message },
-          ] as Message[])
-        : []),
-      ...(resp.expect === "file" && resp.doc
-        ? ([{ id: nextId(), role: "assistant", kind: "upload", doc: resp.doc }] as Message[])
-        : []),
-      ...(resp.complete
-        ? ([{ id: nextId(), role: "assistant", kind: "summary", data: resp }] as Message[])
-        : []),
-      ...(handoffLine
-        ? ([
-            { id: nextId(), role: "assistant", kind: "text", content: handoffLine },
-          ] as Message[])
-        : []),
-    ]);
+    const streamId = streamingIdRef.current;
+    setMessages((prev) => {
+      let next = prev.filter((m) => !(m.role === "assistant" && m.kind === "typing"));
+      if (streamId) {
+        next = next.map((m) =>
+          m.id === streamId && m.role === "assistant" && m.kind === "text"
+            ? { ...m, content: resp.message || m.content }
+            : m,
+        );
+      } else if (resp.message) {
+        next = [
+          ...next,
+          { id: nextId(), role: "assistant", kind: "text", content: resp.message },
+        ];
+      }
+      const extra: Message[] = [];
+      if (resp.expect === "file" && resp.doc) {
+        extra.push({ id: nextId(), role: "assistant", kind: "upload", doc: resp.doc });
+      }
+      if (resp.complete) {
+        extra.push({ id: nextId(), role: "assistant", kind: "summary", data: resp });
+      }
+      if (handoffLine) {
+        extra.push({ id: nextId(), role: "assistant", kind: "text", content: handoffLine });
+      }
+      return [...next, ...extra];
+    });
+
+    streamingIdRef.current = null;
 
     if (resp.application_id) {
       const id = resp.application_id;
@@ -106,28 +129,53 @@ export function Chatbot() {
     }
   };
 
-  const showTyping = () => {
-    setMessages((prev) => [
-      ...prev,
-      { id: "typing", role: "assistant", kind: "typing" },
-    ]);
+  // Shared SSE handlers: grow a single assistant bubble as `delta`s arrive.
+  const makeHandlers = (): ChatStreamHandlers => {
+    streamingIdRef.current = null;
+    return {
+      onDelta: (text) => {
+        // Decide the bubble id and set the ref OUTSIDE the updater so the
+        // updater stays pure (StrictMode double-invokes updaters in dev).
+        if (!streamingIdRef.current) {
+          const id = nextId();
+          streamingIdRef.current = id;
+          setMessages((prev) => [
+            ...prev.filter((m) => !(m.role === "assistant" && m.kind === "typing")),
+            { id, role: "assistant", kind: "text", content: text },
+          ]);
+        } else {
+          const id = streamingIdRef.current;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === id && m.role === "assistant" && m.kind === "text"
+                ? { ...m, content: m.content + text }
+                : m,
+            ),
+          );
+        }
+      },
+      onSnapshot: (resp) => finalizeResponse(resp),
+      onError: (detail) => {
+        setError(detail);
+        setMessages((prev) => prev.filter((m) => !(m.role === "assistant" && m.kind === "typing")));
+        streamingIdRef.current = null;
+      },
+    };
   };
 
   const begin = async () => {
     setBusy(true);
     setError(null);
     showTyping();
-    try {
-      const resp = await chatbotStart();
-      setThreadId(resp.thread_id);
-      renderResponse(resp);
-    } catch (e: unknown) {
-      const detail = errorMessage(e);
-      setError(detail);
-      setMessages((prev) => prev.filter((m) => !(m.role === "assistant" && m.kind === "typing")));
-    } finally {
-      setBusy(false);
-    }
+    const handlers = makeHandlers();
+    await chatbotStartStream({
+      ...handlers,
+      onSnapshot: (resp) => {
+        setThreadId(resp.thread_id);
+        handlers.onSnapshot(resp);
+      },
+    });
+    setBusy(false);
   };
 
   const handleSend = async () => {
@@ -144,15 +192,8 @@ export function Chatbot() {
     setBusy(true);
     setError(null);
     showTyping();
-    try {
-      const resp = await chatbotMessage(threadId, trimmed);
-      renderResponse(resp);
-    } catch (e: unknown) {
-      setError(errorMessage(e));
-      setMessages((prev) => prev.filter((m) => !(m.role === "assistant" && m.kind === "typing")));
-    } finally {
-      setBusy(false);
-    }
+    await chatbotMessageStream(threadId, trimmed, makeHandlers());
+    setBusy(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -175,15 +216,8 @@ export function Chatbot() {
     setBusy(true);
     setError(null);
     showTyping();
-    try {
-      const resp = await chatbotUpload(threadId, file);
-      renderResponse(resp);
-    } catch (err: unknown) {
-      setError(errorMessage(err));
-      setMessages((prev) => prev.filter((m) => !(m.role === "assistant" && m.kind === "typing")));
-    } finally {
-      setBusy(false);
-    }
+    await chatbotUploadStream(threadId, file, makeHandlers());
+    setBusy(false);
   };
 
   const expectingFile = latest?.expect === "file";
@@ -235,9 +269,7 @@ export function Chatbot() {
             if (m.kind === "text") {
               return (
                 <div key={m.id} className="flex flex-col gap-3">
-                  <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-foreground">
-                    {m.content}
-                  </p>
+                  <Markdown content={m.content} />
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <button
                       type="button"
@@ -342,14 +374,29 @@ export function Chatbot() {
   );
 }
 
-function errorMessage(e: unknown): string {
-  if (typeof e === "object" && e !== null) {
-    const anyE = e as { response?: { data?: { detail?: string } }; message?: string };
-    return (
-      anyE.response?.data?.detail ?? anyE.message ?? "Something went wrong. Please try again."
-    );
-  }
-  return "Something went wrong. Please try again.";
+function Markdown({ content }: { content: string }) {
+  return (
+    <div className="text-[15px] leading-relaxed text-foreground">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: (props) => <p className="mb-2 last:mb-0" {...props} />,
+          ul: (props) => <ul className="my-2 list-disc space-y-1 pl-6" {...props} />,
+          ol: (props) => <ol className="my-2 list-decimal space-y-1 pl-6" {...props} />,
+          li: (props) => <li className="pl-1" {...props} />,
+          strong: (props) => <strong className="font-semibold" {...props} />,
+          a: (props) => (
+            <a className="text-orange-600 underline" target="_blank" rel="noreferrer" {...props} />
+          ),
+          code: (props) => (
+            <code className="rounded bg-muted px-1 py-0.5 text-[13px]" {...props} />
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 function DocUpload({
@@ -428,14 +475,13 @@ function SummaryCard({ data }: { data: ChatbotResponse }) {
         </div>
         <p className="text-sm font-semibold text-foreground">Application captured</p>
       </div>
-      <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+      <ul className="my-1 list-disc space-y-1 pl-6 text-[15px] leading-relaxed text-foreground">
         {rows.map((r) => (
-          <div key={r.label} className="flex flex-col">
-            <dt className="text-xs uppercase tracking-wide text-muted-foreground">{r.label}</dt>
-            <dd className="text-sm font-medium text-foreground">{r.value ?? "—"}</dd>
-          </div>
+          <li key={r.label} className="pl-1">
+            <strong className="font-semibold">{r.label}:</strong> {r.value ?? "—"}
+          </li>
         ))}
-      </dl>
+      </ul>
     </div>
   );
 }

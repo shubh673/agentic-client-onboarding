@@ -157,6 +157,127 @@ export async function chatbotUpload(
   return data;
 }
 
+export type ChatStreamHandlers = {
+  onDelta: (text: string) => void;
+  onSnapshot: (resp: ChatbotResponse) => void;
+  onError: (detail: string) => void;
+};
+
+/**
+ * POST to an SSE endpoint and dispatch `delta` / `snapshot` / `error` events.
+ * Uses fetch (not EventSource) so we can send a POST body and the Bearer token,
+ * and mirrors the axios 401 -> /login behavior.
+ */
+async function streamSSE(
+  path: string,
+  init: RequestInit,
+  h: ChatStreamHandlers,
+): Promise<void> {
+  const token = localStorage.getItem(TOKEN_KEY);
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, {
+      ...init,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+  } catch {
+    h.onError("Network error. Please try again.");
+    return;
+  }
+
+  // FastAPI's HTTPBearer returns 403 when the Authorization header is missing
+  // and 401 when the token is invalid/expired — treat both as "please log in".
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem("onboarding.id_token");
+    localStorage.removeItem("onboarding.refresh_token");
+    window.location.assign("/login");
+    return;
+  }
+  if (!res.ok || !res.body) {
+    let detail = "Something went wrong. Please try again.";
+    try {
+      const body = await res.json();
+      detail = body?.detail ?? detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    h.onError(detail);
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const dispatch = (raw: string) => {
+    let event = "message";
+    const dataLines: string[] = [];
+    for (const line of raw.split("\n")) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+    }
+    if (dataLines.length === 0) return;
+    let data: unknown;
+    try {
+      data = JSON.parse(dataLines.join("\n"));
+    } catch {
+      return;
+    }
+    if (event === "delta") h.onDelta((data as { text: string }).text);
+    else if (event === "snapshot") h.onSnapshot(data as ChatbotResponse);
+    else if (event === "error") h.onError((data as { detail: string }).detail);
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buffer.indexOf("\n\n")) !== -1) {
+      const chunk = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      if (chunk.trim()) dispatch(chunk);
+    }
+  }
+  if (buffer.trim()) dispatch(buffer);
+}
+
+export function chatbotStartStream(h: ChatStreamHandlers): Promise<void> {
+  return streamSSE("/chatbot/start/stream", { method: "POST" }, h);
+}
+
+export function chatbotMessageStream(
+  thread_id: string,
+  text: string,
+  h: ChatStreamHandlers,
+): Promise<void> {
+  return streamSSE(
+    "/chatbot/message/stream",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ thread_id, text }),
+    },
+    h,
+  );
+}
+
+export function chatbotUploadStream(
+  thread_id: string,
+  file: File,
+  h: ChatStreamHandlers,
+): Promise<void> {
+  const fd = new FormData();
+  fd.append("thread_id", thread_id);
+  fd.append("file", file);
+  // No explicit Content-Type: the browser sets the multipart boundary.
+  return streamSSE("/chatbot/upload/stream", { method: "POST", body: fd }, h);
+}
+
 export function openApplicationSocket(
   id: string,
   onEvent: (event: ApplicationEvent) => void,

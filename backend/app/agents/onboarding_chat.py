@@ -12,6 +12,7 @@ Differs from the standalone CLI version (main.py reference) in two ways:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime
 from pathlib import Path
@@ -145,13 +146,27 @@ def _validate_file(raw: str) -> tuple[Optional[str], Optional[str]]:
     return None, str(p.resolve())
 
 
+GREETING = (
+    "Hello! 👋 I'm your Onboarding Assistant, here to guide you through a quick and "
+    "secure verification process.\n\n"
+    "To get started, I'll just need a few details from you. You can share them all "
+    "together or one at a time, whichever you prefer:\n\n"
+    "- **Full name**\n"
+    "- **Date of birth** (dd-mm-yyyy)\n"
+    "- **Mobile number**\n"
+    "- **Email address**\n"
+    "- **Residential address**\n"
+    "- **PAN number**\n"
+    "- **Aadhaar number**\n\n"
+    "Your information is used only to verify your identity and complete your "
+    "onboarding. Whenever you're ready, go ahead and send your details, and I'll take "
+    "it from there!"
+)
+
+
 def greet(state: State) -> dict:
-    msg = _say(
-        "You are a friendly KYC onboarding agent. In one short paragraph, introduce "
-        "yourself and ask the user to provide ALL of these in their reply: Full name, "
-        "Date of birth (dd-mm-yyyy), Mobile, Email, Address, PAN number, Aadhaar number."
-    )
-    return {"messages": [msg]}
+    # Fixed, branded welcome — deterministic, so it does not go through the LLM.
+    return {"messages": [AIMessage(content=GREETING)]}
 
 
 def wait_for_user(state: State) -> dict:
@@ -184,6 +199,10 @@ def summarize(state: State) -> dict:
     missing = [LABELS[f] for f in LABELS if not state.get(f)]
     errors = _field_errors(state)
 
+    # Render captured details as a markdown bullet list with bold labels so it
+    # matches the greeting's formatting in the chat UI.
+    have_bullets = [f"- **{label}:** {value}" for label, value in have]
+
     lines: list[str] = []
     if not have:
         lines.append(
@@ -193,21 +212,26 @@ def summarize(state: State) -> dict:
         )
     elif missing:
         lines.append("Thanks! Here's what I have so far:")
-        lines += [f"{label}: {value}" for label, value in have]
+        lines.append("")
+        lines += have_bullets
         lines.append("")
         lines.append("Still need:")
+        lines.append("")
         lines += [f"- {m}" for m in missing]
     elif errors:
         lines.append("Here's what I captured:")
-        lines += [f"{label}: {value}" for label, value in have]
+        lines.append("")
+        lines += have_bullets
         lines.append("")
         lines.append("A few of these need to be corrected before we can proceed:")
+        lines.append("")
         lines += errors
         lines.append("")
         lines.append("Please reply with the corrected value(s).")
     else:
         lines.append("Here are your details:")
-        lines += [f"{label}: {value}" for label, value in have]
+        lines.append("")
+        lines += have_bullets
         lines.append("")
         lines.append("Are these correct? Reply 'yes' to proceed, or tell me what to fix.")
 
@@ -398,3 +422,40 @@ def session_values(thread_id: str) -> dict:
     app = get_graph()
     config = {"configurable": {"thread_id": thread_id}}
     return app.get_state(config).values or {}
+
+
+async def stream_turn(thread_id: str, user_input: Optional[str]):
+    """Run one turn and yield streaming events for SSE.
+
+    Yields ``("delta", piece)`` for each chunk of assistant text, then a final
+    ``("snapshot", dict)`` with the same structured payload as `_snapshot`.
+
+    `user_input` is ``None`` for the first turn (start) and the resume value
+    (text reply or stored file path) for every subsequent turn.
+
+    We run the graph turn to completion (any LLM generation happens here, off the
+    event loop), then type the resulting message out in small chunks so it
+    visibly streams. This is uniform for every message — the static greeting, the
+    templated summary, and the LLM-written upload/closing prompts all stream the
+    same way (LangGraph's token mode emits node-authored messages as one chunk,
+    and Groq is fast enough that real tokens arrive near-instantly, so neither
+    streams visibly on its own).
+    """
+    app = get_graph()
+    config = {"configurable": {"thread_id": thread_id}}
+    graph_input = {"messages": []} if user_input is None else Command(resume=user_input)
+
+    await app.ainvoke(graph_input, config=config)
+
+    snap = _snapshot(app, thread_id)
+    if snap["message"]:
+        async for piece in _typewriter(snap["message"]):
+            yield ("delta", piece)
+    yield ("snapshot", snap)
+
+
+async def _typewriter(text: str, *, step: int = 4, delay: float = 0.012):
+    """Yield `text` in small chunks with a short delay, for a typewriter effect."""
+    for i in range(0, len(text), step):
+        yield text[i : i + step]
+        await asyncio.sleep(delay)
