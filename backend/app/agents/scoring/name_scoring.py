@@ -100,3 +100,45 @@ def score_name_match(name_a: str, name_b: str) -> NameScore:
 
 def is_fuzzy_duplicate(score: NameScore, threshold: float = FUZZY_DUPLICATE_THRESHOLD) -> bool:
     return score["weighted_score"] >= threshold
+
+
+# ---------------------------------------------------------------------------
+# Screening name confirmation (compliance / OpenSanctions)
+#
+# Distinct from the dedup scorer above. Dedup compares two *applicant* names and
+# wants symmetric equality. Screening compares the applicant name against a
+# watchlist entity whose official record often carries extra tokens the applicant
+# never typed (patronymic, middle name): "Vladimir Putin" vs the listed
+# "Vladimir Vladimirovich Putin". The symmetric token_sort scorer drops on those
+# (~0.75) and would wrongly clear a real sanctioned person.
+#
+# token_set_ratio is subset/coverage-aware: it scores ~1.0 when the applicant's
+# tokens are all contained in the entity name, and falls to ~0.6 only when the
+# names genuinely differ ("Shubham Singh" vs "Shri Shubh Saran Singh"). That is
+# exactly the signal needed to drop namesake false positives without dropping
+# real matches.
+# ---------------------------------------------------------------------------
+
+SCREENING_NAME_THRESHOLD = 0.80
+
+
+def screening_name_score(applicant_name: str, entity_names: list[str]) -> float:
+    """Best subset-aware similarity (0.0–1.0) of the applicant name against any
+    of a watchlist entity's names/aliases.
+
+    Returns the maximum `token_set_ratio` (normalised to 0–1) over every
+    non-empty entity name, so an entity listed with extra name tokens still
+    scores ~1.0. Returns 0.0 when the applicant name or every entity name is
+    blank.
+    """
+    a = _normalize(applicant_name)
+    if not a:
+        return 0.0
+
+    best = 0.0
+    for raw in entity_names:
+        b = _normalize(raw or "")
+        if not b:
+            continue
+        best = max(best, fuzz.token_set_ratio(a, b) / 100.0)
+    return round(best, 4)

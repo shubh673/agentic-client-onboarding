@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from app.agents.scoring.name_scoring import screening_name_score
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,12 @@ PEP_TOPICS = {"role.pep", "role.rca"}
 
 @dataclass
 class ComplianceMatch:
-    """A single matched entity, kept for the compliance audit trail."""
+    """A single matched entity, kept for the compliance audit trail.
+
+    `score` is OpenSanctions' own match score; `name_score` is our second-pass
+    subset-aware name similarity; `confirmed` is whether this match survived the
+    name gate (and therefore drives the sanctions/PEP hit flags).
+    """
 
     entity_id: str
     caption: str
@@ -46,12 +52,16 @@ class ComplianceMatch:
     topics: list[str]
     datasets: list[str]
     url: str
+    name_score: float = 0.0
+    confirmed: bool = False
 
     def to_dict(self) -> dict:
         return {
             "entity_id": self.entity_id,
             "caption": self.caption,
             "score": round(self.score, 4),
+            "name_score": round(self.name_score, 4),
+            "confirmed": self.confirmed,
             "topics": self.topics,
             "datasets": self.datasets,
             "url": self.url,
@@ -85,7 +95,42 @@ def _build_query(full_name: str, dob: str, address: str, nationality: str) -> di
     return {"queries": {"q": {"schema": "Person", "properties": properties}}}
 
 
-def _parse_results(results: list[dict], threshold: float, base_url: str) -> ComplianceResult:
+def _entity_names(r: dict) -> list[str]:
+    """All names a result is known by — caption plus name/alias properties."""
+    props = r.get("properties") or {}
+    names: list[str] = []
+    caption = r.get("caption")
+    if caption:
+        names.append(str(caption))
+    for key in ("name", "alias", "weakAlias"):
+        names.extend(str(v) for v in (props.get(key) or []))
+    # De-dup, preserve order.
+    seen: set[str] = set()
+    unique: list[str] = []
+    for n in names:
+        if n and n not in seen:
+            seen.add(n)
+            unique.append(n)
+    return unique
+
+
+def _parse_results(
+    results: list[dict],
+    threshold: float,
+    base_url: str,
+    *,
+    applicant_name: str,
+    name_threshold: float,
+    sanction_floor: float,
+) -> ComplianceResult:
+    """Turn raw /match results into a ComplianceResult, applying the name gate.
+
+    A result only sets a sanctions/PEP hit when it is *confirmed* — its name
+    matches the applicant's at/above `name_threshold`. As a safety backstop, a
+    sanction-topic result with an OpenSanctions score >= `sanction_floor` is
+    confirmed even if the name gate is unsure (we never silently drop a very
+    confident sanctions match).
+    """
     out = ComplianceResult(reference_id=f"OS-{uuid.uuid4()}")
     for r in results:
         score = float(r.get("score", 0.0) or 0.0)
@@ -94,6 +139,14 @@ def _parse_results(results: list[dict], threshold: float, base_url: str) -> Comp
             continue
         topics = list((r.get("properties") or {}).get("topics") or [])
         entity_id = str(r.get("id", ""))
+        name_score = screening_name_score(applicant_name, _entity_names(r))
+
+        is_sanction = bool(SANCTIONS_TOPICS.intersection(topics))
+        is_pep = bool(PEP_TOPICS.intersection(topics))
+        name_ok = name_score >= name_threshold
+        sanction_forced = is_sanction and score >= sanction_floor
+        confirmed = name_ok or sanction_forced
+
         out.matches.append(
             ComplianceMatch(
                 entity_id=entity_id,
@@ -102,11 +155,14 @@ def _parse_results(results: list[dict], threshold: float, base_url: str) -> Comp
                 topics=topics,
                 datasets=list(r.get("datasets") or []),
                 url=f"{base_url.rstrip('/')}/entities/{entity_id}/" if entity_id else "",
+                name_score=name_score,
+                confirmed=confirmed,
             )
         )
-        if SANCTIONS_TOPICS.intersection(topics):
+
+        if is_sanction and confirmed:
             out.sanctions_hit = True
-        if PEP_TOPICS.intersection(topics):
+        if is_pep and name_ok:
             out.pep_hit = True
     return out
 
@@ -149,4 +205,11 @@ async def screen_person(
 
     query_block = (data.get("responses") or {}).get("q") or {}
     results = query_block.get("results") or []
-    return _parse_results(results, settings.OPENSANCTIONS_SCORE_THRESHOLD, settings.OPENSANCTIONS_BASE_URL)
+    return _parse_results(
+        results,
+        settings.OPENSANCTIONS_SCORE_THRESHOLD,
+        settings.OPENSANCTIONS_BASE_URL,
+        applicant_name=full_name,
+        name_threshold=settings.OPENSANCTIONS_NAME_THRESHOLD,
+        sanction_floor=settings.OPENSANCTIONS_SANCTION_FORCE_FLOOR,
+    )

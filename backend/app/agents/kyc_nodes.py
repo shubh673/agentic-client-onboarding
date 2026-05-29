@@ -291,14 +291,25 @@ async def compliance_screening(state: dict, config: RunnableConfig) -> dict:
             "risk_decision": "manual_review",
         }
 
-    # Surface each matched entity for the audit trail.
+    # Surface each matched entity for the audit trail, separating confirmed
+    # matches (drive the decision) from namesakes dropped by the name gate.
     for m in result.matches:
         datasets = ", ".join(m.datasets[:3]) if m.datasets else "—"
-        await _emit(
-            config,
-            "error",
-            f"Screening match: {m.caption} ({datasets}; topics {', '.join(m.topics) or '—'}; score {m.score:.2f})",
-        )
+        topics = ", ".join(m.topics) or "—"
+        if m.confirmed:
+            await _emit(
+                config,
+                "error",
+                f"Screening match: {m.caption} ({datasets}; topics {topics}; "
+                f"score {m.score:.2f}; name {m.name_score:.2f})",
+            )
+        else:
+            await _emit(
+                config,
+                "info",
+                f"Possible namesake dismissed (name {m.name_score:.2f} < threshold): "
+                f"{m.caption} (topics {topics}; score {m.score:.2f})",
+            )
 
     sanctions = "hit" if result.sanctions_hit else "clear"
     pep = "hit" if result.pep_hit else "clear"

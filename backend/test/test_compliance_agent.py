@@ -56,10 +56,12 @@ TEST_CASES: list[dict[str, str]] = [
     {"full_name": "Rahul Gandhi", "dob": "1970-06-19"},          # PEP's real DOB -> PEP HIT
     {"full_name": "Rahul Gandhi", "dob": "1996-08-12"},          # a namesake's DOB -> CLEAR (passes)
 
-    # Contrast: "Shubham Singh" matches a PEP whose record has NO birthDate, so
-    # no DOB can change the outcome (it stays a hit). The only lever there is the
-    # score threshold. (200-01-01 is also a malformed date — left as-is.)
-    {"full_name": "Shubham Singh", "dob": "200-01-01"},
+    # Name gate demo — "Shubham Singh" loosely matches the PEP "Shri Shubh Saran
+    # Singh" (OpenSanctions ~0.76) but the names are genuinely different. Our
+    # second-pass token_set_ratio scores ~0.63 (< 0.80 threshold), so the match
+    # is dismissed as a namesake -> CLEAR (passes). DOB can't help here (that PEP
+    # record has no birthDate); the name gate is what rescues it.
+    {"full_name": "Shubham Singh", "dob": "1995-05-05"},         # namesake -> CLEAR
 ]
 
 
@@ -81,12 +83,15 @@ def _print_result(full_name: str, dob: str, result: ComplianceResult) -> None:
     print(f"REFERENCE  : {result.reference_id}")
 
     if result.matches:
-        print(f"MATCHES    : {len(result.matches)}")
+        confirmed = sum(1 for m in result.matches if m.confirmed)
+        print(f"MATCHES    : {len(result.matches)} ({confirmed} confirmed, "
+              f"{len(result.matches) - confirmed} dismissed as namesake)")
         for m in result.matches:
             datasets = ", ".join(m.datasets[:3]) if m.datasets else "—"
             topics = ", ".join(m.topics) if m.topics else "—"
-            print(f"   - {m.caption}")
-            print(f"       score {m.score:.2f} | topics: {topics}")
+            tag = "CONFIRMED" if m.confirmed else "DISMISSED (namesake)"
+            print(f"   - {m.caption}  [{tag}]")
+            print(f"       os_score {m.score:.2f} | name_match {m.name_score:.2f} | topics: {topics}")
             print(f"       datasets: {datasets}")
             if m.url:
                 print(f"       {m.url}")

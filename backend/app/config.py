@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     OPENSANCTIONS_DATASET: str = "default"
     OPENSANCTIONS_SCORE_THRESHOLD: float = 0.7
     OPENSANCTIONS_TIMEOUT_S: float = 10.0
+    # Second-pass name gate: we re-check the applicant's name against the matched
+    # entity's names (subset-aware) and only confirm a hit at/above this score,
+    # dropping common-name false positives. A very confident sanction match
+    # (>= the force floor) stays flagged regardless, as a safety backstop.
+    OPENSANCTIONS_NAME_THRESHOLD: float = 0.80
+    OPENSANCTIONS_SANCTION_FORCE_FLOOR: float = 0.90
 
     @property
     def cors_origins_list(self) -> list[str]:
